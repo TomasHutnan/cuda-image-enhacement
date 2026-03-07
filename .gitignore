@@ -1,0 +1,47 @@
+# build artifacts
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+Makefile
+cmake_install.cmake
+/*.o
+/*.obj
+/*.so
+/*.dll
+/*.dylib
+/*.exe
+/*.out
+
+# IDE/editor
+.vscode/
+*.suo
+*.user
+*.ncb
+*.opensdf
+*.sdf
+*.db
+*.pyc
+*.pyo
+__pycache__/
+
+# python virtual envs
+venv/
+.env/
+env/
+
+# data
+/data/shift/
+/datasets/
+
+# logs, temp
+*.log
+*.tmp
+tmp/
+*.bak
+
+# OS stuff
+Thumbs.db
+.DS_Store
+
+# lock files
+*.lock
