@@ -34,3 +34,4 @@ python scripts/tgpu.py -h
 ```
 
 Dataset manifest and integrity workflow is documented in [docs/data-validation.md](docs/data-validation.md).
+Pipeline stage naming and validation guidance is documented in [docs/validation.md](docs/validation.md).

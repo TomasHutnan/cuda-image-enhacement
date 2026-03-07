@@ -8,14 +8,14 @@ PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& 
     PipelineRunResult result;
 
     if (options.capture_intermediate_stages) {
-        result.stages.push_back(PipelineStage{"input_normalized", input});
+        result.stages.push_back(PipelineStage{0, "input_normalized", input});
     }
 
     // The actual GPU stages will replace this passthrough as they are implemented.
     result.output = input;
 
     if (options.capture_intermediate_stages) {
-        result.stages.push_back(PipelineStage{"output", result.output});
+        result.stages.push_back(PipelineStage{90, "output", result.output});
     }
 
     return result;

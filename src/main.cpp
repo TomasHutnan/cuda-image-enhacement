@@ -1,6 +1,8 @@
 #include <exception>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -39,6 +41,12 @@ std::string sanitize_stage_name(std::string_view value) {
     }
 
     return sanitized;
+}
+
+std::string format_stage_file_name(const tgpu::PipelineStage& stage) {
+    std::ostringstream builder;
+    builder << std::setw(2) << std::setfill('0') << stage.prefix << "_" << sanitize_stage_name(stage.name) << ".png";
+    return builder.str();
 }
 
 }  // namespace
@@ -80,10 +88,8 @@ int main(int argc, char** argv) {
 
         if (dump_stages) {
             std::filesystem::create_directories(stages_output_dir);
-            for (std::size_t index = 0; index < result.stages.size(); ++index) {
-                const tgpu::PipelineStage& stage = result.stages[index];
-                const std::filesystem::path stage_path = stages_output_dir /
-                    (std::to_string(index) + "_" + sanitize_stage_name(stage.name) + ".png");
+            for (const tgpu::PipelineStage& stage : result.stages) {
+                const std::filesystem::path stage_path = stages_output_dir / format_stage_file_name(stage);
                 tgpu::save_grayscale_image(stage_path, stage.image, output_depth);
             }
         }

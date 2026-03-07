@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -8,6 +9,7 @@
 namespace tgpu {
 
 struct PipelineStage {
+    std::uint32_t prefix = 0;
     std::string name;
     ImageF32 image;
 };
