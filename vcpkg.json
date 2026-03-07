@@ -2,6 +2,7 @@
   "name": "pv162-tescan-gpu",
   "version-string": "0.1.0",
   "dependencies": [
+    "catch2",
     {
       "name": "opencv4",
       "default-features": false,

@@ -7,22 +7,30 @@ CUDA-focused image processing project for the PV162 TESCAN collaboration.
 The C++ build uses `vcpkg` manifest mode.
 
 1. Set the `VCPKG_ROOT` environment variable to your local `vcpkg` installation.
-2. Configure the project with the default preset:
+	For CUDA work, this project is expected to use a VS 2022-compatible toolchain.
+	Configure your preset in `CMakeUserPresets.json`.
+2. Configure the project with your local preset:
 
 ```bash
-cmake --preset default
+cmake --preset local
 ```
 
 3. Build it:
 
 ```bash
-cmake --build --preset default
+cmake --build --preset local
 ```
 
 4. Run the C++ executable:
 
 ```bash
 build\Debug\tgpu_cli.exe <input> <output> --dump-stages <directory>
+```
+
+5. Run the C++ unit tests:
+
+```bash
+ctest --preset local
 ```
 
 ## Run

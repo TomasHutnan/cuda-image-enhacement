@@ -18,7 +18,7 @@ Intermediate stage dumps use stable stage identifiers and a sortable numeric pre
 - Prefixes should leave gaps, usually by tens, so new stages can be inserted later without renaming every file.
 - Python and C++ dumps should use the same stage names.
 
-## Test Split
+## Catch2 Unit Tests
 
-- C++ unit tests for local logic, small deterministic helpers, parameter validation, border handling, shape checks, and simple stage-specific invariants.
-- Python-driven integration tests for end-to-end and stage-by-stage comparison against the reference pipeline.
+- Build the test target with the normal CMake build.
+- Run all C++ tests with `ctest --preset default`.

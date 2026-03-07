@@ -11,6 +11,10 @@
       "displayName": "Default Configure",
       "description": "Configure with vcpkg manifest mode using the VCPKG_ROOT environment variable.",
       "generator": "Visual Studio 17 2022",
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "set"
+      },
       "architecture": {
         "value": "x64",
         "strategy": "set"
@@ -24,7 +28,18 @@
   "buildPresets": [
     {
       "name": "default",
-      "configurePreset": "default"
+      "configurePreset": "default",
+      "configuration": "Debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
