@@ -1,9 +1,11 @@
 # build artifacts
 /build/
+/vcpkg_installed/
 /CMakeFiles/
 /CMakeCache.txt
 Makefile
 cmake_install.cmake
+CMakeUserPresets.json
 /*.o
 /*.obj
 /*.so

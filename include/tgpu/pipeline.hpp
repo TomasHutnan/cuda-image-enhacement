@@ -1,0 +1,26 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "tgpu/image.hpp"
+
+namespace tgpu {
+
+struct PipelineStage {
+    std::string name;
+    ImageF32 image;
+};
+
+struct PipelineRunOptions {
+    bool capture_intermediate_stages = false;
+};
+
+struct PipelineRunResult {
+    ImageF32 output;
+    std::vector<PipelineStage> stages;
+};
+
+PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& options = {});
+
+}  // namespace tgpu
