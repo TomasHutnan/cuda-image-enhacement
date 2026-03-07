@@ -28,10 +28,11 @@ __pycache__/
 venv/
 .env/
 env/
+.venv/
 
 # data
-/data/shift/
-/datasets/
+/data/datasets/*
+!/data/datasets/.gitkeep
 
 # logs, temp
 *.log
