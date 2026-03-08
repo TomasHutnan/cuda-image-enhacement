@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const tgpu::ImageF32 input = tgpu::load_grayscale_image(input_path);
+        const tgpu::ImageGray input = tgpu::load_grayscale_image_raw(input_path);
         const tgpu::PipelineRunOptions options{.capture_intermediate_stages = dump_stages};
         const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
         tgpu::save_grayscale_image(output_path, result.output, output_depth);

@@ -23,6 +23,7 @@ struct PipelineRunResult {
     std::vector<PipelineStage> stages;
 };
 
+PipelineRunResult run_pipeline(const ImageGray& input, const PipelineRunOptions& options = {});
 PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& options = {});
 
 }  // namespace tgpu

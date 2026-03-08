@@ -1,24 +1,19 @@
+// Public pipeline entrypoints that forward into the CUDA implementation.
+
 #include "tgpu/pipeline.hpp"
 
-#include <utility>
+namespace tgpu
+{
+    PipelineRunResult run_pipeline_cuda(const ImageGray &input, const PipelineRunOptions &options);
+    PipelineRunResult run_pipeline_cuda(const ImageF32 &input, const PipelineRunOptions &options);
 
-namespace tgpu {
-
-PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& options) {
-    PipelineRunResult result;
-
-    if (options.capture_intermediate_stages) {
-        result.stages.push_back(PipelineStage{0, "input_normalized", input});
+    PipelineRunResult run_pipeline(const ImageGray &input, const PipelineRunOptions &options)
+    {
+        return run_pipeline_cuda(input, options);
     }
 
-    // The actual GPU stages will replace this passthrough as they are implemented.
-    result.output = input;
-
-    if (options.capture_intermediate_stages) {
-        result.stages.push_back(PipelineStage{90, "output", result.output});
+    PipelineRunResult run_pipeline(const ImageF32 &input, const PipelineRunOptions &options)
+    {
+        return run_pipeline_cuda(input, options);
     }
-
-    return result;
-}
-
-}  // namespace tgpu
+} // namespace tgpu
