@@ -6,6 +6,6 @@ namespace tgpu
 {
     void run_non_local_means_stage(const StageWorkspace &workspace)
     {
-        run_passthrough_stage(workspace, "richardson-lucy placeholder stage");
+        run_passthrough_stage(workspace, "non local means placeholder stage");
     }
 } // namespace tgpu
