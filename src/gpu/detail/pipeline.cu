@@ -35,7 +35,7 @@ namespace tgpu
 
             capture_stage_if_requested(result, options, pipeline, 0, "input_normalized", pipeline.current);
 
-            run_non_local_means_stage(stage_workspace(pipeline));
+            run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
             commit_stage_output(pipeline);
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[0].prefix, kPipelineStages[0].name, pipeline.current);
 

@@ -27,7 +27,10 @@ TEST_CASE("Pipeline passthrough preserves normalized image dimensions", "[pipeli
     input.stride = 3;
     input.data = {0.0F, 0.25F, 0.5F, 0.75F, 1.0F, 0.125F};
 
-    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input);
+    tgpu::PipelineRunOptions options;
+    options.non_local_means.enabled = false;
+
+    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
     REQUIRE(result.stages.empty());
     REQUIRE(result.output.width == input.width);
@@ -43,7 +46,8 @@ TEST_CASE("Pipeline stage capture uses stable stage names and prefixes", "[pipel
     input.stride = 2;
     input.data = {0.1F, 0.2F, 0.3F, 0.4F};
 
-    const tgpu::PipelineRunOptions options{.capture_intermediate_stages = true};
+    tgpu::PipelineRunOptions options{.capture_intermediate_stages = true};
+    options.non_local_means.enabled = false;
     const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
     REQUIRE(result.stages.size() == 6);
@@ -81,7 +85,10 @@ TEST_CASE("Pipeline normalizes raw grayscale input on the GPU", "[pipeline]") {
     input.bit_depth = tgpu::BitDepth::u8;
     input.data = {0, 64, 128, 255};
 
-    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input);
+    tgpu::PipelineRunOptions options;
+    options.non_local_means.enabled = false;
+
+    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
     REQUIRE(result.output.width == input.width);
     REQUIRE(result.output.height == input.height);
@@ -92,4 +99,23 @@ TEST_CASE("Pipeline normalizes raw grayscale input on the GPU", "[pipeline]") {
     CHECK(result.output.data[1] == Catch::Approx(64.0F / 255.0F));
     CHECK(result.output.data[2] == Catch::Approx(128.0F / 255.0F));
     CHECK(result.output.data[3] == Catch::Approx(1.0F));
+}
+
+TEST_CASE("Non-local means preserves a constant image", "[pipeline]") {
+    tgpu::ImageF32 input;
+    input.width = 3;
+    input.height = 3;
+    input.stride = 3;
+    input.data = {
+        0.5F, 0.5F, 0.5F,
+        0.5F, 0.5F, 0.5F,
+        0.5F, 0.5F, 0.5F,
+    };
+
+    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input);
+
+    REQUIRE(result.output.data.size() == input.data.size());
+    for (std::size_t index = 0; index < input.data.size(); ++index) {
+        CHECK(result.output.data[index] == Catch::Approx(input.data[index]));
+    }
 }

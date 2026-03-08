@@ -8,6 +8,13 @@
 
 namespace tgpu {
 
+struct NonLocalMeansOptions {
+    bool enabled = true;
+    float filter_strength = 7.0F / 255.0F;
+    int patch_size = 3;
+    int search_radius = 1;
+};
+
 struct PipelineStage {
     std::uint32_t prefix = 0;
     std::string name;
@@ -16,6 +23,7 @@ struct PipelineStage {
 
 struct PipelineRunOptions {
     bool capture_intermediate_stages = false;
+    NonLocalMeansOptions non_local_means{};
 };
 
 struct PipelineRunResult {
