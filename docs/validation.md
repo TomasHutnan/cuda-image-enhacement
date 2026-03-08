@@ -22,3 +22,8 @@ Intermediate stage dumps use stable stage identifiers and a sortable numeric pre
 
 - Build the test target with the normal CMake build.
 - Run all C++ tests with `ctest --preset default`.
+
+## Pytest Integration Tests (TBD)
+
+- How to compare outputs with reference?
+- How to find suitable thresholds for comparisson?
