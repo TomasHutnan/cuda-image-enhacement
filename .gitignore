@@ -41,6 +41,7 @@ env/
 *.tmp
 tmp/
 *.bak
+/temp/*
 
 # OS stuff
 Thumbs.db
