@@ -15,6 +15,13 @@ struct NonLocalMeansOptions {
     int search_radius = 1;
 };
 
+struct StageExecutionOptions {
+    bool non_local_means = true;
+    bool unsharp_mask = true;
+    bool richardson_lucy = true;
+    bool histogram_stretch = true;
+};
+
 struct PipelineStage {
     std::uint32_t prefix = 0;
     std::string name;
@@ -24,6 +31,7 @@ struct PipelineStage {
 struct PipelineRunOptions {
     bool capture_intermediate_stages = false;
     NonLocalMeansOptions non_local_means{};
+    StageExecutionOptions stage_execution{};
 };
 
 struct PipelineRunResult {

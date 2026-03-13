@@ -111,14 +111,21 @@ def compare_stage_directories(
     candidate_dir: Path,
     *,
     crop_border_px: int = 0,
+    only_stage: str | None = None,
 ) -> list[StageMetrics]:
     if not reference_dir.exists() or not reference_dir.is_dir():
         raise ValueError(f"Reference directory does not exist: {reference_dir}")
     if not candidate_dir.exists() or not candidate_dir.is_dir():
         raise ValueError(f"Candidate directory does not exist: {candidate_dir}")
 
+    ordered_stages = list(iter_stage_definitions())
+    if only_stage is not None and only_stage not in {stage.name for stage in ordered_stages}:
+        raise ValueError(f"Unsupported stage name for only_stage: {only_stage}")
+
     results: list[StageMetrics] = []
-    for stage in iter_stage_definitions():
+    for stage in ordered_stages:
+        if only_stage is not None and stage.name != only_stage:
+            continue
         file_name = format_stage_filename(stage.prefix, stage.name)
         reference_path = reference_dir / file_name
         candidate_path = candidate_dir / file_name
@@ -179,16 +186,22 @@ def compare_stage_deltas(
     candidate_dir: Path,
     *,
     crop_border_px: int = 0,
+    only_stage: str | None = None,
 ) -> list[StageDeltaMetrics]:
     reference_images = _load_stage_image_map(reference_dir, crop_border_px)
     candidate_images = _load_stage_image_map(candidate_dir, crop_border_px)
 
     ordered_stages = list(iter_stage_definitions())
+    if only_stage is not None and only_stage not in {stage.name for stage in ordered_stages}:
+        raise ValueError(f"Unsupported stage name for only_stage: {only_stage}")
+
     results: list[StageDeltaMetrics] = []
 
     for index in range(1, len(ordered_stages)):
         previous_stage = ordered_stages[index - 1]
         stage = ordered_stages[index]
+        if only_stage is not None and stage.name != only_stage:
+            continue
 
         reference_prev = reference_images[previous_stage.name]
         reference_current = reference_images[stage.name]

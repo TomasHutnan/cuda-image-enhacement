@@ -35,20 +35,32 @@ namespace tgpu
 
             capture_stage_if_requested(result, options, pipeline, 0, "input_normalized", pipeline.current);
 
-            run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
-            commit_stage_output(pipeline);
+            if (options.stage_execution.non_local_means)
+            {
+                run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
+                commit_stage_output(pipeline);
+            }
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[0].prefix, kPipelineStages[0].name, pipeline.current);
 
-            run_unsharp_mask_stage(stage_workspace(pipeline));
-            commit_stage_output(pipeline);
+            if (options.stage_execution.unsharp_mask)
+            {
+                run_unsharp_mask_stage(stage_workspace(pipeline));
+                commit_stage_output(pipeline);
+            }
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[1].prefix, kPipelineStages[1].name, pipeline.current);
 
-            run_richardson_lucy_stage(stage_workspace(pipeline));
-            commit_stage_output(pipeline);
+            if (options.stage_execution.richardson_lucy)
+            {
+                run_richardson_lucy_stage(stage_workspace(pipeline));
+                commit_stage_output(pipeline);
+            }
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[2].prefix, kPipelineStages[2].name, pipeline.current);
 
-            run_histogram_stretch_stage(stage_workspace(pipeline));
-            commit_stage_output(pipeline);
+            if (options.stage_execution.histogram_stretch)
+            {
+                run_histogram_stretch_stage(stage_workspace(pipeline));
+                commit_stage_output(pipeline);
+            }
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[3].prefix, kPipelineStages[3].name, pipeline.current);
 
             result.output = download_visible_region(pipeline, pipeline.current);

@@ -28,10 +28,33 @@ Intermediate stage dumps use stable stage identifiers and a sortable numeric pre
 - How to compare outputs with reference?
 - How to find suitable thresholds for comparisson?
 
+## C++ CLI Stage Isolation
+
+The C++ executable can run one stage in isolation using:
+
+```bash
+.\build\Debug\tgpu_cli.exe <input> <output> --dump-stages <dir> --only-stage unsharp_mask
+```
+
+Supported stage names:
+
+```text
+non_local_means
+unsharp_mask
+richardson_lucy
+histogram_stretch
+```
+
 ## Reference Stage Capture Wrapper
 
 ```bash
 python scripts/tgpu.py reference capture-stages <input_image> <output_dir> --save-bit-depth u16
+```
+
+To run and capture only one reference stage in isolation:
+
+```bash
+python scripts/tgpu.py reference capture-stages <input_image> <output_dir> --only-stage unsharp_mask
 ```
 
 This writes the same stage-name sequence used by C++:
@@ -57,6 +80,12 @@ To also compute border-free metrics, crop an equal margin from all sides before 
 
 ```bash
 python scripts/tgpu.py reference compare-stages <reference_dir> <candidate_dir> --crop-border-px 16
+```
+
+To focus the report on one stage only:
+
+```bash
+python scripts/tgpu.py reference compare-stages <reference_dir> <candidate_dir> --stage unsharp_mask
 ```
 
 Expected convention for both directories:

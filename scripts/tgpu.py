@@ -9,6 +9,9 @@ from tgpu.paths import get_manifest_path
 from tgpu.verify import verify_manifest
 
 
+STAGE_CHOICES = ("non_local_means", "unsharp_mask", "richardson_lucy", "histogram_stretch")
+
+
 def add_manifest_subcommands(subparsers: argparse._SubParsersAction) -> None:
     manifest_parser = subparsers.add_parser("manifest", help="Build and verify dataset manifests")
     manifest_subparsers = manifest_parser.add_subparsers(dest="manifest_command", required=True)
@@ -58,6 +61,12 @@ def add_reference_subcommands(subparsers: argparse._SubParsersAction) -> None:
         default=0.5,
         help="Saturation percentile used by the reference histogram stretch",
     )
+    capture_parser.add_argument(
+        "--only-stage",
+        choices=STAGE_CHOICES,
+        default=None,
+        help="Run only this stage in isolation (all other stages are bypassed)",
+    )
 
     compare_parser = reference_subparsers.add_parser(
         "compare-stages", help="Compare two stage-capture directories and report per-stage metrics"
@@ -69,6 +78,12 @@ def add_reference_subcommands(subparsers: argparse._SubParsersAction) -> None:
         type=int,
         default=0,
         help="Ignore this many pixels on each image border before computing border-free metrics",
+    )
+    compare_parser.add_argument(
+        "--stage",
+        choices=STAGE_CHOICES,
+        default=None,
+        help="Compare only this stage (useful for isolated-stage validation)",
     )
 
 
@@ -145,6 +160,7 @@ def handle_reference_capture_stages(args: argparse.Namespace) -> int:
         save_bit_depth=args.save_bit_depth,
         rl_output_dtype=args.rl_output_dtype,
         histogram_sat_percent=args.histogram_sat_percent,
+        only_stage=args.only_stage,
     )
 
     print(f"Wrote {len(written_paths)} stage images:")
@@ -172,6 +188,7 @@ def handle_reference_compare_stages(args: argparse.Namespace) -> int:
     full_metrics = compare_stage_directories(
         reference_dir=reference_path,
         candidate_dir=candidate_path,
+        only_stage=args.stage,
     )
     print("Full image metrics")
     print(format_metrics_table(full_metrics))
@@ -181,6 +198,7 @@ def handle_reference_compare_stages(args: argparse.Namespace) -> int:
             reference_dir=reference_path,
             candidate_dir=candidate_path,
             crop_border_px=args.crop_border_px,
+            only_stage=args.stage,
         )
         print("")
         print(f"Border-free metrics (crop_border_px={args.crop_border_px})")
@@ -190,6 +208,7 @@ def handle_reference_compare_stages(args: argparse.Namespace) -> int:
             reference_dir=reference_path,
             candidate_dir=candidate_path,
             crop_border_px=args.crop_border_px,
+            only_stage=args.stage,
         )
         print("")
         print(f"Border-free stage effect metrics (crop_border_px={args.crop_border_px})")
@@ -205,6 +224,7 @@ def handle_reference_compare_stages(args: argparse.Namespace) -> int:
             reference_dir=reference_path,
             candidate_dir=candidate_path,
             crop_border_px=0,
+            only_stage=args.stage,
         )
         print("")
         print("Stage effect metrics")

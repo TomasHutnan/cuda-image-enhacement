@@ -86,11 +86,18 @@ def format_stage_filename(prefix: int, name: str) -> str:
     return f"{prefix:02d}_{name}.png"
 
 
+def _is_stage_enabled(stage_name: str, only_stage: str | None) -> bool:
+    if only_stage is None:
+        return True
+    return stage_name == only_stage
+
+
 def run_reference_pipeline_with_stage_capture(
     input_image: np.ndarray,
     *,
     rl_output_dtype: str = "uint16",
     histogram_sat_percent: float = 0.5,
+    only_stage: str | None = None,
 ) -> list[CapturedStage]:
     if input_image.ndim != 2:
         raise ValueError("Expected a 2D grayscale image")
@@ -98,10 +105,24 @@ def run_reference_pipeline_with_stage_capture(
     reference = _load_reference_module()
 
     stage_input = _normalize_to_f32(input_image)
-    stage_nlm = reference.non_local_means(input_image)
-    stage_unsharp = reference.unsharp_masking(stage_nlm)
-    stage_rl = reference.richardson_lucy_deconvolution(stage_unsharp, output_dtype=rl_output_dtype)
-    stage_hist = reference.histogram_stretch(stage_rl, sat_percent=histogram_sat_percent)
+    if only_stage is not None and only_stage not in set(iter_stage_names()):
+        raise ValueError(f"Unsupported stage name for only_stage: {only_stage}")
+
+    stage_nlm = stage_input
+    if _is_stage_enabled("non_local_means", only_stage):
+        stage_nlm = np.asarray(reference.non_local_means(stage_nlm))
+
+    stage_unsharp = stage_nlm
+    if _is_stage_enabled("unsharp_mask", only_stage):
+        stage_unsharp = np.asarray(reference.unsharp_masking(stage_unsharp))
+
+    stage_rl = stage_unsharp
+    if _is_stage_enabled("richardson_lucy", only_stage):
+        stage_rl = np.asarray(reference.richardson_lucy_deconvolution(stage_rl, output_dtype=rl_output_dtype))
+
+    stage_hist = stage_rl
+    if _is_stage_enabled("histogram_stretch", only_stage):
+        stage_hist = np.asarray(reference.histogram_stretch(stage_hist, sat_percent=histogram_sat_percent))
 
     return [
         CapturedStage(0, "input_normalized", stage_input),
@@ -120,6 +141,7 @@ def capture_reference_stages_from_file(
     save_bit_depth: str = "u16",
     rl_output_dtype: str = "uint16",
     histogram_sat_percent: float = 0.5,
+    only_stage: str | None = None,
 ) -> list[Path]:
     image = cv2.imread(str(input_path), cv2.IMREAD_UNCHANGED)
     if image is None:
@@ -131,6 +153,7 @@ def capture_reference_stages_from_file(
         image,
         rl_output_dtype=rl_output_dtype,
         histogram_sat_percent=histogram_sat_percent,
+        only_stage=only_stage,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)

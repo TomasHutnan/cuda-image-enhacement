@@ -12,7 +12,8 @@
 namespace {
 
 void print_usage() {
-    std::cout << "Usage: tgpu_cli <input> <output> [--output-depth u8|u16] [--dump-stages <directory>]\n";
+    std::cout << "Usage: tgpu_cli <input> <output> [--output-depth u8|u16] [--dump-stages <directory>]"
+                 " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]\n";
 }
 
 tgpu::BitDepth parse_bit_depth(const std::string& value) {
@@ -49,6 +50,32 @@ std::string format_stage_file_name(const tgpu::PipelineStage& stage) {
     return builder.str();
 }
 
+void apply_only_stage_option(tgpu::PipelineRunOptions& options, const std::string& value) {
+    options.stage_execution.non_local_means = false;
+    options.stage_execution.unsharp_mask = false;
+    options.stage_execution.richardson_lucy = false;
+    options.stage_execution.histogram_stretch = false;
+
+    if (value == "non_local_means") {
+        options.stage_execution.non_local_means = true;
+        return;
+    }
+    if (value == "unsharp_mask") {
+        options.stage_execution.unsharp_mask = true;
+        return;
+    }
+    if (value == "richardson_lucy") {
+        options.stage_execution.richardson_lucy = true;
+        return;
+    }
+    if (value == "histogram_stretch") {
+        options.stage_execution.histogram_stretch = true;
+        return;
+    }
+
+    throw std::runtime_error("Unsupported stage name for --only-stage: " + value);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -63,6 +90,7 @@ int main(int argc, char** argv) {
     tgpu::BitDepth output_depth = tgpu::BitDepth::u8;
     std::filesystem::path stages_output_dir;
     bool dump_stages = false;
+    tgpu::PipelineRunOptions options;
 
     for (int index = 3; index < argc; ++index) {
         const std::string argument = argv[index];
@@ -75,6 +103,10 @@ int main(int argc, char** argv) {
             stages_output_dir = argv[++index];
             continue;
         }
+        if (argument == "--only-stage" && index + 1 < argc) {
+            apply_only_stage_option(options, argv[++index]);
+            continue;
+        }
 
         print_usage();
         return 1;
@@ -82,7 +114,7 @@ int main(int argc, char** argv) {
 
     try {
         const tgpu::ImageGray input = tgpu::load_grayscale_image_raw(input_path);
-        const tgpu::PipelineRunOptions options{.capture_intermediate_stages = dump_stages};
+        options.capture_intermediate_stages = dump_stages;
         const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
         tgpu::save_grayscale_image(output_path, result.output, output_depth);
 
