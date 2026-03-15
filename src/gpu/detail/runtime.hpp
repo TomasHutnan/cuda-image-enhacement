@@ -65,7 +65,7 @@ namespace tgpu
     void run_non_local_means_stage(const StageWorkspace &workspace, const NonLocalMeansOptions &options);
     void run_unsharp_mask_stage(const StageWorkspace &workspace);
     void run_richardson_lucy_stage(const StageWorkspace &workspace);
-    void run_histogram_stretch_stage(const StageWorkspace &workspace);
+    void run_histogram_stretch_stage(const StageWorkspace &workspace, const HistogramStretchOptions &options);
     void run_passthrough_stage(const StageWorkspace &workspace, const char *operation);
 
     ImageF32 download_visible_region(const DevicePipeline &pipeline, const float *source);

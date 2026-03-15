@@ -15,6 +15,12 @@ struct NonLocalMeansOptions {
     int search_radius = 1;
 };
 
+struct HistogramStretchOptions {
+    bool enabled = true;
+    float saturation_percent = 0.5F;
+    int histogram_bins = 4096;
+};
+
 struct StageExecutionOptions {
     bool non_local_means = true;
     bool unsharp_mask = true;
@@ -31,6 +37,7 @@ struct PipelineStage {
 struct PipelineRunOptions {
     bool capture_intermediate_stages = false;
     NonLocalMeansOptions non_local_means{};
+    HistogramStretchOptions histogram_stretch{};
     StageExecutionOptions stage_execution{};
 };
 

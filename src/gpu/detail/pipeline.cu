@@ -58,7 +58,7 @@ namespace tgpu
 
             if (options.stage_execution.histogram_stretch)
             {
-                run_histogram_stretch_stage(stage_workspace(pipeline));
+                run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch);
                 commit_stage_output(pipeline);
             }
             capture_stage_if_requested(result, options, pipeline, kPipelineStages[3].prefix, kPipelineStages[3].name, pipeline.current);
