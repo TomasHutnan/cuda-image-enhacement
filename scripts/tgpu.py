@@ -86,6 +86,25 @@ def add_reference_subcommands(subparsers: argparse._SubParsersAction) -> None:
         help="Compare only this stage (useful for isolated-stage validation)",
     )
 
+    view_parser = reference_subparsers.add_parser(
+        "view-stages",
+        help="Open an interactive window to visually compare stage dumps from two directories",
+    )
+    view_parser.add_argument("first_dir", help="First stage-capture directory")
+    view_parser.add_argument("second_dir", help="Second stage-capture directory")
+    view_parser.add_argument(
+        "--mode",
+        choices=("pair", "grid"),
+        default="pair",
+        help="pair: one stage at a time with arrow keys; grid: all stages in one window",
+    )
+    view_parser.add_argument(
+        "--stage",
+        choices=STAGE_CHOICES,
+        default=None,
+        help="Show only this stage",
+    )
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="tgpu", description="Project data management utilities")
@@ -239,6 +258,26 @@ def handle_reference_compare_stages(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_reference_view_stages(args: argparse.Namespace) -> int:
+    from tgpu.stage_viewer import show_stage_viewer
+
+    first_path = Path(args.first_dir)
+    second_path = Path(args.second_dir)
+
+    first_label = first_path.name or str(first_path)
+    second_label = second_path.name or str(second_path)
+
+    show_stage_viewer(
+        first_dir=first_path,
+        second_dir=second_path,
+        first_label=first_label,
+        second_label=second_label,
+        mode=args.mode,
+        only_stage=args.stage,
+    )
+    return 0
+
+
 def main() -> int:
     args = parse_args()
 
@@ -257,6 +296,8 @@ def main() -> int:
             return handle_reference_capture_stages(args)
         if args.reference_command == "compare-stages":
             return handle_reference_compare_stages(args)
+        if args.reference_command == "view-stages":
+            return handle_reference_view_stages(args)
 
     raise ValueError(f"Unsupported command combination: {args.command}")
 
