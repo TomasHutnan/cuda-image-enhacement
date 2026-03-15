@@ -1,24 +1,8 @@
-#include <cstddef>
-#include <cstdint>
-
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "tgpu/image.hpp"
 #include "tgpu/pipeline.hpp"
-
-TEST_CASE("ImageF32 reports empty state consistently", "[image]") {
-    tgpu::ImageF32 image;
-    REQUIRE(image.empty());
-
-    image.width = 4;
-    image.height = 3;
-    image.stride = 4;
-    image.data.resize(12, 0.0F);
-
-    REQUIRE_FALSE(image.empty());
-    REQUIRE(image.size() == 12);
-}
 
 TEST_CASE("Pipeline passthrough preserves normalized image dimensions", "[pipeline]") {
     tgpu::ImageF32 input;
@@ -29,6 +13,10 @@ TEST_CASE("Pipeline passthrough preserves normalized image dimensions", "[pipeli
 
     tgpu::PipelineRunOptions options;
     options.non_local_means.enabled = false;
+    options.stage_execution.non_local_means = false;
+    options.stage_execution.unsharp_mask = false;
+    options.stage_execution.richardson_lucy = false;
+    options.stage_execution.histogram_stretch = false;
 
     const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
@@ -48,6 +36,11 @@ TEST_CASE("Pipeline stage capture uses stable stage names and prefixes", "[pipel
 
     tgpu::PipelineRunOptions options{.capture_intermediate_stages = true};
     options.non_local_means.enabled = false;
+    options.stage_execution.non_local_means = false;
+    options.stage_execution.unsharp_mask = false;
+    options.stage_execution.richardson_lucy = false;
+    options.stage_execution.histogram_stretch = false;
+
     const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
     REQUIRE(result.stages.size() == 6);
@@ -87,6 +80,10 @@ TEST_CASE("Pipeline normalizes raw grayscale input on the GPU", "[pipeline]") {
 
     tgpu::PipelineRunOptions options;
     options.non_local_means.enabled = false;
+    options.stage_execution.non_local_means = false;
+    options.stage_execution.unsharp_mask = false;
+    options.stage_execution.richardson_lucy = false;
+    options.stage_execution.histogram_stretch = false;
 
     const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
 
@@ -99,23 +96,4 @@ TEST_CASE("Pipeline normalizes raw grayscale input on the GPU", "[pipeline]") {
     CHECK(result.output.data[1] == Catch::Approx(64.0F / 255.0F));
     CHECK(result.output.data[2] == Catch::Approx(128.0F / 255.0F));
     CHECK(result.output.data[3] == Catch::Approx(1.0F));
-}
-
-TEST_CASE("Non-local means preserves a constant image", "[pipeline]") {
-    tgpu::ImageF32 input;
-    input.width = 3;
-    input.height = 3;
-    input.stride = 3;
-    input.data = {
-        0.5F, 0.5F, 0.5F,
-        0.5F, 0.5F, 0.5F,
-        0.5F, 0.5F, 0.5F,
-    };
-
-    const tgpu::PipelineRunResult result = tgpu::run_pipeline(input);
-
-    REQUIRE(result.output.data.size() == input.data.size());
-    for (std::size_t index = 0; index < input.data.size(); ++index) {
-        CHECK(result.output.data[index] == Catch::Approx(input.data[index]));
-    }
 }

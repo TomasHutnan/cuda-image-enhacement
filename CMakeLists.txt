@@ -63,7 +63,10 @@ add_executable(tgpu_cli src/main.cpp)
 target_link_libraries(tgpu_cli PRIVATE tgpu_core)
 
 add_executable(tgpu_unit_tests
-    tests/cpp/pipeline_tests.cpp
+    tests/cpp/core/image_tests.cpp
+    tests/cpp/core/pipeline_tests.cpp
+    tests/cpp/stages/nlm_stage_tests.cpp
+    tests/cpp/stages/histogram_stretch_stage_tests.cpp
 )
 
 target_link_libraries(tgpu_unit_tests
