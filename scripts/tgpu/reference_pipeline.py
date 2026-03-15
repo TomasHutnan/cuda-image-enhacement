@@ -82,6 +82,16 @@ def _to_saveable(image: np.ndarray, bit_depth: str) -> np.ndarray:
     raise ValueError(f"Unsupported conversion from {image.dtype} to {target_dtype}")
 
 
+def _to_reference_histogram_input(image: np.ndarray, rl_output_dtype: str) -> np.ndarray:
+    if image.dtype == np.uint8 or image.dtype == np.uint16:
+        return image
+
+    if rl_output_dtype == "uint8":
+        return _to_saveable(image, bit_depth="u8")
+
+    return _to_saveable(image, bit_depth="u16")
+
+
 def format_stage_filename(prefix: int, name: str) -> str:
     return f"{prefix:02d}_{name}.png"
 
@@ -122,7 +132,8 @@ def run_reference_pipeline_with_stage_capture(
 
     stage_hist = stage_rl
     if _is_stage_enabled("histogram_stretch", only_stage):
-        stage_hist = np.asarray(reference.histogram_stretch(stage_hist, sat_percent=histogram_sat_percent))
+        stage_hist_input = _to_reference_histogram_input(np.asarray(stage_hist), rl_output_dtype)
+        stage_hist = np.asarray(reference.histogram_stretch(stage_hist_input, sat_percent=histogram_sat_percent))
 
     return [
         CapturedStage(0, "input_normalized", stage_input),
