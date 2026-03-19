@@ -58,15 +58,12 @@ namespace tgpu
         __global__ void apply_histogram_stretch_kernel(
             const float *input,
             float *output,
-            int expanded_width,
-            int expanded_height,
+            std::size_t element_count,
             float low_value,
             float high_value)
         {
             const std::size_t index = static_cast<std::size_t>(blockIdx.x) * static_cast<std::size_t>(blockDim.x) +
                                       static_cast<std::size_t>(threadIdx.x);
-            const std::size_t element_count =
-                static_cast<std::size_t>(expanded_width) * static_cast<std::size_t>(expanded_height);
             if (index >= element_count)
             {
                 return;
@@ -183,8 +180,7 @@ namespace tgpu
         apply_histogram_stretch_kernel<<<block_count, kThreadsPerBlock>>>(
             workspace.input,
             workspace.output,
-            workspace.expanded_width,
-            workspace.expanded_height,
+            element_count,
             low_value,
             high_value);
         throw_if_kernel_failed("histogram stretch apply");
