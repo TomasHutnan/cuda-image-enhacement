@@ -20,8 +20,6 @@ namespace tgpu
             bool valid = false;
             float sigma = 0.0F;
             int radius = 0;
-            int kernel_size = 0;
-            int kernel_element_count = 0;
             std::array<float, kMaxPsfElements> weights{};
         };
 
@@ -144,8 +142,6 @@ namespace tgpu
         const bool cache_hit =
             cache.valid &&
             cache.radius == radius &&
-            cache.kernel_size == kernel_size &&
-            cache.kernel_element_count == kernel_element_count &&
             same_sigma(cache.sigma, options.psf_sigma);
         if (!cache_hit)
         {
@@ -179,8 +175,6 @@ namespace tgpu
             cache.valid = true;
             cache.sigma = options.psf_sigma;
             cache.radius = radius;
-            cache.kernel_size = kernel_size;
-            cache.kernel_element_count = kernel_element_count;
 
             throw_if_cuda_failed(
                 cudaMemcpyToSymbol(
