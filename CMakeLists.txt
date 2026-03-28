@@ -59,7 +59,13 @@ target_link_libraries(tgpu_core
 
 target_compile_features(tgpu_core PUBLIC cxx_std_20)
 
-add_executable(tgpu_cli src/main.cpp)
+add_executable(tgpu_cli
+    src/main.cpp
+    src/cli/cli_options.cpp
+    src/cli/reporting.cpp
+    src/cli/processing.cpp
+)
+target_include_directories(tgpu_cli PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(tgpu_cli PRIVATE tgpu_core)
 
 add_executable(tgpu_unit_tests
