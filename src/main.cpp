@@ -13,7 +13,8 @@ namespace {
 
 void print_usage() {
     std::cout << "Usage: tgpu_cli <input> <output> [--output-depth u8|u16] [--dump-stages <directory>]"
-                 " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]\n";
+                 " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]"
+                 " [--unsharp-sigma <value>] [--unsharp-amount <value>] [--benchmark]\n";
 }
 
 tgpu::BitDepth parse_bit_depth(const std::string& value) {
@@ -24,6 +25,19 @@ tgpu::BitDepth parse_bit_depth(const std::string& value) {
         return tgpu::BitDepth::u16;
     }
     throw std::runtime_error("Unsupported output depth: " + value);
+}
+
+float parse_float_option(const std::string& value, std::string_view name) {
+    try {
+        std::size_t consumed = 0;
+        const float parsed = std::stof(value, &consumed);
+        if (consumed != value.size()) {
+            throw std::runtime_error("Invalid value for --" + std::string{name} + ": " + value);
+        }
+        return parsed;
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid value for --" + std::string{name} + ": " + value);
+    }
 }
 
 std::string sanitize_stage_name(std::string_view value) {
@@ -76,6 +90,42 @@ void apply_only_stage_option(tgpu::PipelineRunOptions& options, const std::strin
     throw std::runtime_error("Unsupported stage name for --only-stage: " + value);
 }
 
+void print_benchmark_report(const tgpu::PipelineRunResult& result, const tgpu::PipelineRunOptions& options) {
+    if (!result.benchmark.collected) {
+        return;
+    }
+
+    const auto stage_time = [](bool enabled, double ms) -> std::string {
+        if (!enabled) {
+            return "n/a";
+        }
+
+        std::ostringstream stream;
+        stream << std::fixed << std::setprecision(3) << ms;
+        return stream.str();
+    };
+
+    const double filters_ms =
+        result.benchmark.non_local_means_ms +
+        result.benchmark.unsharp_mask_ms +
+        result.benchmark.richardson_lucy_ms +
+        result.benchmark.histogram_stretch_ms;
+    const double copy_ms = result.benchmark.host_to_device_ms + result.benchmark.device_to_host_ms;
+    const double total_ms = filters_ms + copy_ms;
+
+    std::cout << "Benchmark (ms):\n";
+    std::cout << "  copy_h2d             " << std::fixed << std::setprecision(3) << result.benchmark.host_to_device_ms << "\n";
+    std::cout << "  non_local_means      " << stage_time(options.stage_execution.non_local_means, result.benchmark.non_local_means_ms) << "\n";
+    std::cout << "  unsharp_mask         " << stage_time(options.stage_execution.unsharp_mask, result.benchmark.unsharp_mask_ms) << "\n";
+    std::cout << "  richardson_lucy      " << stage_time(options.stage_execution.richardson_lucy, result.benchmark.richardson_lucy_ms) << "\n";
+    std::cout << "  histogram_stretch    " << stage_time(options.stage_execution.histogram_stretch, result.benchmark.histogram_stretch_ms) << "\n";
+    std::cout << "  copy_d2h             " << std::fixed << std::setprecision(3) << result.benchmark.device_to_host_ms << "\n";
+    std::cout << "  ------------------------------\n";
+    std::cout << "  filters_total        " << std::fixed << std::setprecision(3) << filters_ms << "\n";
+    std::cout << "  copy_total           " << std::fixed << std::setprecision(3) << copy_ms << "\n";
+    std::cout << "  total                " << std::fixed << std::setprecision(3) << total_ms << "\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -107,6 +157,18 @@ int main(int argc, char** argv) {
             apply_only_stage_option(options, argv[++index]);
             continue;
         }
+        if (argument == "--unsharp-sigma" && index + 1 < argc) {
+            options.unsharp_mask.sigma = parse_float_option(argv[++index], "unsharp-sigma");
+            continue;
+        }
+        if (argument == "--unsharp-amount" && index + 1 < argc) {
+            options.unsharp_mask.amount = parse_float_option(argv[++index], "unsharp-amount");
+            continue;
+        }
+        if (argument == "--benchmark") {
+            options.collect_benchmark = true;
+            continue;
+        }
 
         print_usage();
         return 1;
@@ -117,6 +179,7 @@ int main(int argc, char** argv) {
         options.capture_intermediate_stages = dump_stages;
         const tgpu::PipelineRunResult result = tgpu::run_pipeline(input, options);
         tgpu::save_grayscale_image(output_path, result.output, output_depth);
+        print_benchmark_report(result, options);
 
         if (dump_stages) {
             std::filesystem::create_directories(stages_output_dir);

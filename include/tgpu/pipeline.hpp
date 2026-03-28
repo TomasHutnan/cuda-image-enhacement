@@ -21,6 +21,11 @@ struct HistogramStretchOptions {
     int histogram_bins = 4096;
 };
 
+struct UnsharpMaskOptions {
+    float sigma = 1.6666667F;
+    float amount = 0.6F;
+};
+
 struct StageExecutionOptions {
     bool non_local_means = true;
     bool unsharp_mask = true;
@@ -34,9 +39,21 @@ struct PipelineStage {
     ImageF32 image;
 };
 
+struct PipelineBenchmark {
+    bool collected = false;
+    double host_to_device_ms = 0.0;
+    double non_local_means_ms = 0.0;
+    double unsharp_mask_ms = 0.0;
+    double richardson_lucy_ms = 0.0;
+    double histogram_stretch_ms = 0.0;
+    double device_to_host_ms = 0.0;
+};
+
 struct PipelineRunOptions {
     bool capture_intermediate_stages = false;
+    bool collect_benchmark = false;
     NonLocalMeansOptions non_local_means{};
+    UnsharpMaskOptions unsharp_mask{};
     HistogramStretchOptions histogram_stretch{};
     StageExecutionOptions stage_execution{};
 };
@@ -44,6 +61,7 @@ struct PipelineRunOptions {
 struct PipelineRunResult {
     ImageF32 output;
     std::vector<PipelineStage> stages;
+    PipelineBenchmark benchmark{};
 };
 
 PipelineRunResult run_pipeline(const ImageGray& input, const PipelineRunOptions& options = {});
