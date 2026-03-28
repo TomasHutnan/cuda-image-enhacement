@@ -14,7 +14,9 @@ namespace {
 void print_usage() {
     std::cout << "Usage: tgpu_cli <input> <output> [--output-depth u8|u16] [--dump-stages <directory>]"
                  " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]"
-                 " [--unsharp-sigma <value>] [--unsharp-amount <value>] [--benchmark]\n";
+                 " [--unsharp-sigma <value>] [--unsharp-amount <value>]"
+                 " [--rl-iterations <int>] [--rl-psf-sigma <value>] [--rl-psf-radius <int>] [--rl-epsilon <value>]"
+                 " [--benchmark]\n";
 }
 
 tgpu::BitDepth parse_bit_depth(const std::string& value) {
@@ -31,6 +33,19 @@ float parse_float_option(const std::string& value, std::string_view name) {
     try {
         std::size_t consumed = 0;
         const float parsed = std::stof(value, &consumed);
+        if (consumed != value.size()) {
+            throw std::runtime_error("Invalid value for --" + std::string{name} + ": " + value);
+        }
+        return parsed;
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid value for --" + std::string{name} + ": " + value);
+    }
+}
+
+int parse_int_option(const std::string& value, std::string_view name) {
+    try {
+        std::size_t consumed = 0;
+        const int parsed = std::stoi(value, &consumed);
         if (consumed != value.size()) {
             throw std::runtime_error("Invalid value for --" + std::string{name} + ": " + value);
         }
@@ -163,6 +178,22 @@ int main(int argc, char** argv) {
         }
         if (argument == "--unsharp-amount" && index + 1 < argc) {
             options.unsharp_mask.amount = parse_float_option(argv[++index], "unsharp-amount");
+            continue;
+        }
+        if (argument == "--rl-iterations" && index + 1 < argc) {
+            options.richardson_lucy.iterations = parse_int_option(argv[++index], "rl-iterations");
+            continue;
+        }
+        if (argument == "--rl-psf-sigma" && index + 1 < argc) {
+            options.richardson_lucy.psf_sigma = parse_float_option(argv[++index], "rl-psf-sigma");
+            continue;
+        }
+        if (argument == "--rl-psf-radius" && index + 1 < argc) {
+            options.richardson_lucy.psf_radius = parse_int_option(argv[++index], "rl-psf-radius");
+            continue;
+        }
+        if (argument == "--rl-epsilon" && index + 1 < argc) {
+            options.richardson_lucy.epsilon = parse_float_option(argv[++index], "rl-epsilon");
             continue;
         }
         if (argument == "--benchmark") {

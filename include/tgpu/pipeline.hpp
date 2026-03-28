@@ -26,6 +26,13 @@ struct UnsharpMaskOptions {
     float amount = 0.6F;
 };
 
+struct RichardsonLucyOptions {
+    int iterations = 2;
+    float psf_sigma = 2.5F;
+    int psf_radius = 7;
+    float epsilon = 1.0e-7F;
+};
+
 struct StageExecutionOptions {
     bool non_local_means = true;
     bool unsharp_mask = true;
@@ -54,6 +61,7 @@ struct PipelineRunOptions {
     bool collect_benchmark = false;
     NonLocalMeansOptions non_local_means{};
     UnsharpMaskOptions unsharp_mask{};
+    RichardsonLucyOptions richardson_lucy{};
     HistogramStretchOptions histogram_stretch{};
     StageExecutionOptions stage_execution{};
 };

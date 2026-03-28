@@ -67,6 +67,7 @@ add_executable(tgpu_unit_tests
     tests/cpp/core/pipeline_tests.cpp
     tests/cpp/stages/nlm_stage_tests.cpp
     tests/cpp/stages/unsharp_mask_stage_tests.cpp
+    tests/cpp/stages/richardson_lucy_stage_tests.cpp
     tests/cpp/stages/histogram_stretch_stage_tests.cpp
 )
 

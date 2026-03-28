@@ -89,12 +89,12 @@ namespace tgpu
                 if (options.collect_benchmark)
                 {
                     result.benchmark.richardson_lucy_ms = timed_ms([&]() {
-                        run_richardson_lucy_stage(stage_workspace(pipeline));
+                        run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
                     });
                 }
                 else
                 {
-                    run_richardson_lucy_stage(stage_workspace(pipeline));
+                    run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
                 }
                 commit_stage_output(pipeline);
             }
