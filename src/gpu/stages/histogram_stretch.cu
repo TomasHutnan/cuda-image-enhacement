@@ -82,19 +82,6 @@ namespace tgpu
             return static_cast<float>(bin) / static_cast<float>(bins - 1);
         }
 
-        int find_percentile_bin(const std::vector<unsigned int> &histogram, std::uint64_t rank)
-        {
-            std::uint64_t cumulative = 0;
-            for (int bin = 0; bin < static_cast<int>(histogram.size()); ++bin)
-            {
-                cumulative += static_cast<std::uint64_t>(histogram[bin]);
-                if (cumulative > rank)
-                {
-                    return bin;
-                }
-            }
-            return static_cast<int>(histogram.size()) - 1;
-        }
     } // namespace
 
     void run_histogram_stretch_stage(const StageWorkspace &workspace, const HistogramStretchOptions &options)
@@ -113,7 +100,6 @@ namespace tgpu
         throw_if_cuda_failed(
             cudaDeviceGetAttribute(&max_shared_memory_bytes, cudaDevAttrMaxSharedMemoryPerBlock, 0),
             "cudaDeviceGetAttribute max shared memory");
-
         const int max_bins_by_shared = std::max(max_shared_memory_bytes / static_cast<int>(sizeof(unsigned int)), 1);
         const int max_bins_by_workspace =
             static_cast<int>(std::min(expanded_element_count, static_cast<std::size_t>(std::numeric_limits<int>::max())));
@@ -161,8 +147,24 @@ namespace tgpu
         const std::uint64_t low_rank = static_cast<std::uint64_t>(std::floor(low_fraction * static_cast<double>(last_rank)));
         const std::uint64_t high_rank = static_cast<std::uint64_t>(std::floor(high_fraction * static_cast<double>(last_rank)));
 
-        const int low_bin = find_percentile_bin(histogram, low_rank);
-        const int high_bin = find_percentile_bin(histogram, high_rank);
+        std::uint64_t cumulative = 0;
+        int low_bin = static_cast<int>(histogram.size()) - 1;
+        int high_bin = static_cast<int>(histogram.size()) - 1;
+        bool low_found = false;
+        for (int bin = 0; bin < static_cast<int>(histogram.size()); ++bin)
+        {
+            cumulative += static_cast<std::uint64_t>(histogram[bin]);
+            if (!low_found && cumulative > low_rank)
+            {
+                low_bin = bin;
+                low_found = true;
+            }
+            if (cumulative > high_rank)
+            {
+                high_bin = bin;
+                break;
+            }
+        }
 
         const float low_value = bin_to_value(low_bin, bins);
         const float high_value = bin_to_value(high_bin, bins);
