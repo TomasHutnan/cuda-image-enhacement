@@ -22,10 +22,29 @@ namespace tgpu
         throw std::runtime_error(std::string{operation} + ": " + cudaGetErrorString(status));
     }
 
+    inline bool &strict_kernel_sync_checks_flag()
+    {
+        static thread_local bool enabled = false;
+        return enabled;
+    }
+
+    inline void set_strict_kernel_sync_checks(bool enabled)
+    {
+        strict_kernel_sync_checks_flag() = enabled;
+    }
+
+    inline bool strict_kernel_sync_checks_enabled()
+    {
+        return strict_kernel_sync_checks_flag();
+    }
+
     inline void throw_if_kernel_failed(const char *operation)
     {
-        throw_if_cuda_failed(cudaGetLastError(), operation);
-        throw_if_cuda_failed(cudaDeviceSynchronize(), operation);
+        throw_if_cuda_failed(cudaPeekAtLastError(), operation);
+        if (strict_kernel_sync_checks_enabled())
+        {
+            throw_if_cuda_failed(cudaDeviceSynchronize(), operation);
+        }
     }
 
     inline int compute_border(int width, int height)
@@ -79,5 +98,7 @@ namespace tgpu
 
     PipelineRunResult run_pipeline_cuda(const ImageGray &input, const PipelineRunOptions &options);
     PipelineRunResult run_pipeline_cuda(const ImageF32 &input, const PipelineRunOptions &options);
+    void begin_pipeline_batch_cuda(int width, int height);
+    void end_pipeline_batch_cuda();
 
 } // namespace tgpu

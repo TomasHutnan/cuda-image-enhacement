@@ -78,6 +78,7 @@ void print_usage(std::ostream& output) {
               " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]"
               " [--unsharp-sigma <value>] [--unsharp-amount <value>]"
               " [--rl-iterations <int>] [--rl-psf-sigma <value>] [--rl-psf-radius <int>] [--rl-epsilon <value>]"
+              " [--strict-kernel-sync]"
               " [--benchmark]\n"
               "\nNote: <input> and <output> can be files or directories. When processing directories,\n"
               "all supported image files (.png, .jpg, .jpeg, .tif, .tiff, .bmp, .pgm) are processed.\n";
@@ -133,6 +134,10 @@ CliArguments parse_cli_arguments(int argc, char** argv) {
         }
         if (argument == "--benchmark") {
             arguments.pipeline_options.collect_benchmark = true;
+            continue;
+        }
+        if (argument == "--strict-kernel-sync") {
+            arguments.pipeline_options.strict_kernel_sync_checks = true;
             continue;
         }
 

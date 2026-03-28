@@ -59,6 +59,7 @@ struct PipelineBenchmark {
 struct PipelineRunOptions {
     bool capture_intermediate_stages = false;
     bool collect_benchmark = false;
+    bool strict_kernel_sync_checks = false;
     NonLocalMeansOptions non_local_means{};
     UnsharpMaskOptions unsharp_mask{};
     RichardsonLucyOptions richardson_lucy{};
@@ -74,5 +75,10 @@ struct PipelineRunResult {
 
 PipelineRunResult run_pipeline(const ImageGray& input, const PipelineRunOptions& options = {});
 PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& options = {});
+
+// Initializes persistent GPU workspace for processing a same-resolution batch.
+void begin_pipeline_batch(int width, int height);
+// Releases persistent GPU workspace allocated by begin_pipeline_batch.
+void end_pipeline_batch();
 
 }  // namespace tgpu

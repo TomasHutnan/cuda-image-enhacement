@@ -3,6 +3,7 @@
 #include "detail/runtime.hpp"
 
 #include <chrono>
+#include <optional>
 
 namespace tgpu
 {
@@ -19,6 +20,16 @@ namespace tgpu
             return std::chrono::duration<double, std::milli>(end - begin).count();
         }
 
+        template <typename Func>
+        double timed_stage_ms(Func &&func, const char *operation)
+        {
+            const auto begin = Clock::now();
+            func();
+            throw_if_cuda_failed(cudaDeviceSynchronize(), operation);
+            const auto end = Clock::now();
+            return std::chrono::duration<double, std::milli>(end - begin).count();
+        }
+
         struct StageDefinition
         {
             std::uint32_t prefix;
@@ -30,6 +41,36 @@ namespace tgpu
             {20, "unsharp_mask"},
             {30, "richardson_lucy"},
             {40, "histogram_stretch"},
+        };
+
+        struct BatchPipelineContext
+        {
+            bool active = false;
+            int width = 0;
+            int height = 0;
+            std::optional<DevicePipeline> pipeline;
+        };
+
+        BatchPipelineContext &batch_pipeline_context()
+        {
+            static BatchPipelineContext context;
+            return context;
+        }
+
+        struct StrictKernelSyncGuard
+        {
+            bool previous = false;
+
+            explicit StrictKernelSyncGuard(bool enabled)
+            {
+                previous = strict_kernel_sync_checks_enabled();
+                set_strict_kernel_sync_checks(enabled);
+            }
+
+            ~StrictKernelSyncGuard()
+            {
+                set_strict_kernel_sync_checks(previous);
+            }
         };
 
         __global__ void passthrough_stage_kernel(const float *input, float *output, std::size_t count)
@@ -56,9 +97,9 @@ namespace tgpu
             {
                 if (options.collect_benchmark)
                 {
-                    result.benchmark.non_local_means_ms = timed_ms([&]() {
+                    result.benchmark.non_local_means_ms = timed_stage_ms([&]() {
                         run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
-                    });
+                    }, "benchmark non_local_means synchronize");
                 }
                 else
                 {
@@ -72,9 +113,9 @@ namespace tgpu
             {
                 if (options.collect_benchmark)
                 {
-                    result.benchmark.unsharp_mask_ms = timed_ms([&]() {
+                    result.benchmark.unsharp_mask_ms = timed_stage_ms([&]() {
                         run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask);
-                    });
+                    }, "benchmark unsharp_mask synchronize");
                 }
                 else
                 {
@@ -88,9 +129,9 @@ namespace tgpu
             {
                 if (options.collect_benchmark)
                 {
-                    result.benchmark.richardson_lucy_ms = timed_ms([&]() {
+                    result.benchmark.richardson_lucy_ms = timed_stage_ms([&]() {
                         run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
-                    });
+                    }, "benchmark richardson_lucy synchronize");
                 }
                 else
                 {
@@ -104,9 +145,9 @@ namespace tgpu
             {
                 if (options.collect_benchmark)
                 {
-                    result.benchmark.histogram_stretch_ms = timed_ms([&]() {
+                    result.benchmark.histogram_stretch_ms = timed_stage_ms([&]() {
                         run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch);
-                    });
+                    }, "benchmark histogram_stretch synchronize");
                 }
                 else
                 {
@@ -153,21 +194,43 @@ namespace tgpu
             return {};
         }
 
-        DevicePipeline pipeline = create_pipeline(input.width, input.height);
+        StrictKernelSyncGuard sync_guard(options.strict_kernel_sync_checks);
+
+        BatchPipelineContext &context = batch_pipeline_context();
+        DevicePipeline local_pipeline;
+        DevicePipeline *pipeline = nullptr;
+        if (context.active)
+        {
+            if (context.width != input.width || context.height != input.height)
+            {
+                throw std::runtime_error("run_pipeline: image dimensions differ from active batch context");
+            }
+            if (!context.pipeline.has_value())
+            {
+                context.pipeline.emplace(create_pipeline(input.width, input.height));
+            }
+            pipeline = &context.pipeline.value();
+        }
+        else
+        {
+            local_pipeline = create_pipeline(input.width, input.height);
+            pipeline = &local_pipeline;
+        }
+
         PipelineRunResult result;
         if (options.collect_benchmark)
         {
             result.benchmark.collected = true;
             result.benchmark.host_to_device_ms = timed_ms([&]() {
-                initialize_pipeline_from_raw(input, pipeline);
+                initialize_pipeline_from_raw(input, *pipeline);
             });
-            PipelineRunResult tail = finalize_pipeline(pipeline, options);
+            PipelineRunResult tail = finalize_pipeline(*pipeline, options);
             tail.benchmark.host_to_device_ms = result.benchmark.host_to_device_ms;
             return tail;
         }
 
-        initialize_pipeline_from_raw(input, pipeline);
-        return finalize_pipeline(pipeline, options);
+        initialize_pipeline_from_raw(input, *pipeline);
+        return finalize_pipeline(*pipeline, options);
     }
 
     PipelineRunResult run_pipeline_cuda(const ImageF32 &input, const PipelineRunOptions &options)
@@ -177,20 +240,72 @@ namespace tgpu
             return {};
         }
 
-        DevicePipeline pipeline = create_pipeline(input.width, input.height);
+        StrictKernelSyncGuard sync_guard(options.strict_kernel_sync_checks);
+
+        BatchPipelineContext &context = batch_pipeline_context();
+        DevicePipeline local_pipeline;
+        DevicePipeline *pipeline = nullptr;
+        if (context.active)
+        {
+            if (context.width != input.width || context.height != input.height)
+            {
+                throw std::runtime_error("run_pipeline: image dimensions differ from active batch context");
+            }
+            if (!context.pipeline.has_value())
+            {
+                context.pipeline.emplace(create_pipeline(input.width, input.height));
+            }
+            pipeline = &context.pipeline.value();
+        }
+        else
+        {
+            local_pipeline = create_pipeline(input.width, input.height);
+            pipeline = &local_pipeline;
+        }
+
         PipelineRunResult result;
         if (options.collect_benchmark)
         {
             result.benchmark.collected = true;
             result.benchmark.host_to_device_ms = timed_ms([&]() {
-                initialize_pipeline_from_normalized(input, pipeline);
+                initialize_pipeline_from_normalized(input, *pipeline);
             });
-            PipelineRunResult tail = finalize_pipeline(pipeline, options);
+            PipelineRunResult tail = finalize_pipeline(*pipeline, options);
             tail.benchmark.host_to_device_ms = result.benchmark.host_to_device_ms;
             return tail;
         }
 
-        initialize_pipeline_from_normalized(input, pipeline);
-        return finalize_pipeline(pipeline, options);
+        initialize_pipeline_from_normalized(input, *pipeline);
+        return finalize_pipeline(*pipeline, options);
+    }
+
+    void begin_pipeline_batch_cuda(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            throw std::runtime_error("begin_pipeline_batch: width and height must be positive");
+        }
+
+        BatchPipelineContext &context = batch_pipeline_context();
+        const bool same_shape = context.active && context.width == width && context.height == height;
+        if (same_shape)
+        {
+            return;
+        }
+
+        context.pipeline.reset();
+        context.pipeline.emplace(create_pipeline(width, height));
+        context.active = true;
+        context.width = width;
+        context.height = height;
+    }
+
+    void end_pipeline_batch_cuda()
+    {
+        BatchPipelineContext &context = batch_pipeline_context();
+        context.pipeline.reset();
+        context.active = false;
+        context.width = 0;
+        context.height = 0;
     }
 } // namespace tgpu

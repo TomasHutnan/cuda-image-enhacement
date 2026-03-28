@@ -15,14 +15,25 @@ namespace tgpu
 
         __constant__ float kPsf[kMaxPsfElements];
 
-        __global__ void copy_kernel(const float *input, float *output, std::size_t count)
+        struct PsfCache
         {
-            const std::size_t index = static_cast<std::size_t>(blockIdx.x) * static_cast<std::size_t>(blockDim.x) +
-                                      static_cast<std::size_t>(threadIdx.x);
-            if (index < count)
-            {
-                output[index] = input[index];
-            }
+            bool valid = false;
+            float sigma = 0.0F;
+            int radius = 0;
+            int kernel_size = 0;
+            int kernel_element_count = 0;
+            std::array<float, kMaxPsfElements> weights{};
+        };
+
+        PsfCache &psf_cache()
+        {
+            static PsfCache cache;
+            return cache;
+        }
+
+        bool same_sigma(float lhs, float rhs)
+        {
+            return fabsf(lhs - rhs) <= 1.0e-6F;
         }
 
         __global__ void psf_convolution_kernel(
@@ -129,42 +140,57 @@ namespace tgpu
         const int kernel_size = 2 * radius + 1;
         const int kernel_element_count = kernel_size * kernel_size;
 
-        std::array<float, kMaxPsfElements> host_psf{};
-        float sum = 0.0F;
-        const float sigma_squared = options.psf_sigma * options.psf_sigma;
-
-        for (int y = 0; y < kernel_size; ++y)
+        PsfCache &cache = psf_cache();
+        const bool cache_hit =
+            cache.valid &&
+            cache.radius == radius &&
+            cache.kernel_size == kernel_size &&
+            cache.kernel_element_count == kernel_element_count &&
+            same_sigma(cache.sigma, options.psf_sigma);
+        if (!cache_hit)
         {
-            const int offset_y = y - radius;
-            for (int x = 0; x < kernel_size; ++x)
+            float sum = 0.0F;
+            const float sigma_squared = options.psf_sigma * options.psf_sigma;
+
+            for (int y = 0; y < kernel_size; ++y)
             {
-                const int offset_x = x - radius;
-                const float distance_squared = static_cast<float>(offset_x * offset_x + offset_y * offset_y);
-                const float value = expf(-distance_squared / (2.0F * sigma_squared));
-                host_psf[static_cast<std::size_t>(y * kernel_size + x)] = value;
-                sum += value;
+                const int offset_y = y - radius;
+                for (int x = 0; x < kernel_size; ++x)
+                {
+                    const int offset_x = x - radius;
+                    const float distance_squared = static_cast<float>(offset_x * offset_x + offset_y * offset_y);
+                    const float value = expf(-distance_squared / (2.0F * sigma_squared));
+                    cache.weights[static_cast<std::size_t>(y * kernel_size + x)] = value;
+                    sum += value;
+                }
             }
-        }
 
-        if (sum <= 0.0F)
-        {
-            run_passthrough_stage(workspace, "richardson-lucy degenerate psf");
-            return;
-        }
+            if (sum <= 0.0F)
+            {
+                run_passthrough_stage(workspace, "richardson-lucy degenerate psf");
+                return;
+            }
 
-        for (int index = 0; index < kernel_element_count; ++index)
-        {
-            host_psf[static_cast<std::size_t>(index)] /= sum;
-        }
+            for (int index = 0; index < kernel_element_count; ++index)
+            {
+                cache.weights[static_cast<std::size_t>(index)] /= sum;
+            }
 
-        throw_if_cuda_failed(
-            cudaMemcpyToSymbol(
-                kPsf,
-                host_psf.data(),
-                static_cast<std::size_t>(kernel_element_count) * sizeof(float),
-                0,
-                cudaMemcpyHostToDevice),
-            "cudaMemcpyToSymbol richardson-lucy psf");
+            cache.valid = true;
+            cache.sigma = options.psf_sigma;
+            cache.radius = radius;
+            cache.kernel_size = kernel_size;
+            cache.kernel_element_count = kernel_element_count;
+
+            throw_if_cuda_failed(
+                cudaMemcpyToSymbol(
+                    kPsf,
+                    cache.weights.data(),
+                    static_cast<std::size_t>(kernel_element_count) * sizeof(float),
+                    0,
+                    cudaMemcpyHostToDevice),
+                "cudaMemcpyToSymbol richardson-lucy psf");
+        }
 
         const std::size_t element_count =
             static_cast<std::size_t>(workspace.expanded_width) * static_cast<std::size_t>(workspace.expanded_height);
@@ -177,14 +203,19 @@ namespace tgpu
                                       static_cast<int>(kImageBlockSize.y)),
             1};
 
-        copy_kernel<<<block_count, kThreadsPerBlock>>>(workspace.input, workspace.auxiliary, element_count);
-        throw_if_kernel_failed("richardson-lucy initialize estimate");
+        throw_if_cuda_failed(
+            cudaMemcpy(
+                workspace.output,
+                workspace.input,
+                element_count * sizeof(float),
+                cudaMemcpyDeviceToDevice),
+            "cudaMemcpy richardson-lucy initialize estimate");
 
         for (int iteration = 0; iteration < options.iterations; ++iteration)
         {
             psf_convolution_kernel<<<grid_size, kImageBlockSize>>>(
-                workspace.auxiliary,
                 workspace.output,
+                workspace.auxiliary,
                 workspace.expanded_width,
                 workspace.expanded_height,
                 radius,
@@ -193,23 +224,20 @@ namespace tgpu
 
             ratio_kernel<<<block_count, kThreadsPerBlock>>>(
                 workspace.input,
-                workspace.output,
-                workspace.output,
+                workspace.auxiliary,
+                workspace.auxiliary,
                 element_count,
                 options.epsilon);
             throw_if_kernel_failed("richardson-lucy ratio");
 
             backward_update_kernel<<<grid_size, kImageBlockSize>>>(
-                workspace.output,
                 workspace.auxiliary,
+                workspace.output,
                 workspace.expanded_width,
                 workspace.expanded_height,
                 radius,
                 kernel_size);
             throw_if_kernel_failed("richardson-lucy backward update");
         }
-
-        copy_kernel<<<block_count, kThreadsPerBlock>>>(workspace.auxiliary, workspace.output, element_count);
-        throw_if_kernel_failed("richardson-lucy finalize output");
     }
 } // namespace tgpu

@@ -93,6 +93,9 @@ int run_directory_mode(const CliArguments& arguments) {
 
         std::vector<ProcessingResult> results;
         int failed_count = 0;
+        bool batch_initialized = false;
+        int batch_width = 0;
+        int batch_height = 0;
 
         for (const auto& image_file : image_files) {
             std::cout << "Processing: " << image_file.filename() << "... ";
@@ -103,6 +106,18 @@ int run_directory_mode(const CliArguments& arguments) {
 
             try {
                 const tgpu::ImageGray input = tgpu::load_grayscale_image_raw(image_file);
+                if (!batch_initialized) {
+                    tgpu::begin_pipeline_batch(input.width, input.height);
+                    batch_initialized = true;
+                    batch_width = input.width;
+                    batch_height = input.height;
+                } else if (input.width != batch_width || input.height != batch_height) {
+                    throw std::runtime_error(
+                        "Batch mode expects same resolution images; got " +
+                        std::to_string(input.width) + "x" + std::to_string(input.height) +
+                        ", expected " + std::to_string(batch_width) + "x" + std::to_string(batch_height));
+                }
+
                 tgpu::PipelineRunOptions options = arguments.pipeline_options;
                 options.capture_intermediate_stages = arguments.dump_stages;
 
@@ -135,6 +150,10 @@ int run_directory_mode(const CliArguments& arguments) {
             results.push_back(std::move(result));
         }
 
+        if (batch_initialized) {
+            tgpu::end_pipeline_batch();
+        }
+
         std::cout << "\n";
         if (arguments.pipeline_options.collect_benchmark) {
             print_mean_benchmark_report(results, arguments.pipeline_options);
@@ -145,6 +164,10 @@ int run_directory_mode(const CliArguments& arguments) {
             return 1;
         }
     } catch (const std::exception& error) {
+        try {
+            tgpu::end_pipeline_batch();
+        } catch (const std::exception&) {
+        }
         std::cerr << error.what() << '\n';
         return 1;
     }
