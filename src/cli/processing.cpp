@@ -1,11 +1,17 @@
 #include "cli/processing.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <condition_variable>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -40,6 +46,72 @@ std::vector<std::filesystem::path> list_image_files(const std::filesystem::path&
     std::sort(images.begin(), images.end());
     return images;
 }
+
+template <typename T>
+class BoundedQueue {
+public:
+    explicit BoundedQueue(std::size_t capacity) : capacity_(capacity) {
+    }
+
+    bool push(T item) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        can_push_.wait(lock, [this]() {
+            return closed_ || queue_.size() < capacity_;
+        });
+        if (closed_) {
+            return false;
+        }
+
+        queue_.push_back(std::move(item));
+        can_pop_.notify_one();
+        return true;
+    }
+
+    bool pop(T& item) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        can_pop_.wait(lock, [this]() {
+            return closed_ || !queue_.empty();
+        });
+        if (queue_.empty()) {
+            return false;
+        }
+
+        item = std::move(queue_.front());
+        queue_.pop_front();
+        can_push_.notify_one();
+        return true;
+    }
+
+    void close() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            closed_ = true;
+        }
+        can_push_.notify_all();
+        can_pop_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable can_push_;
+    std::condition_variable can_pop_;
+    std::deque<T> queue_;
+    std::size_t capacity_ = 1;
+    bool closed_ = false;
+};
+
+struct LoadedImageTask {
+    std::size_t index = 0;
+    std::filesystem::path image_file;
+    std::optional<tgpu::ImageGray> image;
+    std::string error;
+};
+
+struct SaveImageTask {
+    std::size_t index = 0;
+    std::filesystem::path image_file;
+    std::filesystem::path output_file;
+};
 
 }  // namespace
 
@@ -91,21 +163,82 @@ int run_directory_mode(const CliArguments& arguments) {
 
         std::cout << "Processing " << image_files.size() << " image(s) from " << arguments.input_path << "...\n\n";
 
-        std::vector<ProcessingResult> results;
-        int failed_count = 0;
+        tgpu::PipelineRunOptions options = arguments.pipeline_options;
+        options.capture_intermediate_stages = arguments.dump_stages;
+
+        std::vector<ProcessingResult> results(image_files.size());
+        for (std::size_t i = 0; i < image_files.size(); ++i) {
+            results[i].input_file = image_files[i];
+        }
+
+        std::atomic<int> failed_count{0};
+        BoundedQueue<LoadedImageTask> load_queue(3);
+        BoundedQueue<SaveImageTask> save_queue(2);
+
+        std::thread load_thread([&]() {
+            for (std::size_t i = 0; i < image_files.size(); ++i) {
+                LoadedImageTask task;
+                task.index = i;
+                task.image_file = image_files[i];
+                try {
+                    task.image = tgpu::load_grayscale_image_raw(task.image_file);
+                } catch (const std::exception& error) {
+                    task.error = error.what();
+                }
+
+                if (!load_queue.push(std::move(task))) {
+                    break;
+                }
+            }
+            load_queue.close();
+        });
+
+        std::thread save_thread([&]() {
+            SaveImageTask save_task;
+            while (save_queue.pop(save_task)) {
+                try {
+                    const tgpu::PipelineRunResult& pipeline_result = results[save_task.index].pipeline_result;
+                    tgpu::save_grayscale_image(save_task.output_file, pipeline_result.output, arguments.output_depth);
+
+                    if (arguments.dump_stages) {
+                        const std::string extension = save_task.image_file.extension().string();
+                        const std::string extension_no_dot = extension.size() > 1 ? extension.substr(1) : "";
+                        const std::string subfolder_name = save_task.image_file.stem().string() + "_" + to_lower(extension_no_dot);
+                        const std::filesystem::path stage_dump_dir = arguments.stages_output_dir / subfolder_name;
+                        std::filesystem::create_directories(stage_dump_dir);
+
+                        for (const tgpu::PipelineStage& stage : pipeline_result.stages) {
+                            const std::filesystem::path stage_path = stage_dump_dir / format_stage_file_name(stage);
+                            tgpu::save_grayscale_image(stage_path, stage.image, arguments.output_depth);
+                        }
+                    }
+
+                    results[save_task.index].success = true;
+                } catch (const std::exception& error) {
+                    std::cerr << "FAILED SAVE: " << save_task.image_file.filename() << ": " << error.what() << '\n';
+                    results[save_task.index].success = false;
+                    failed_count.fetch_add(1);
+                }
+            }
+        });
+
         bool batch_initialized = false;
         int batch_width = 0;
         int batch_height = 0;
 
-        for (const auto& image_file : image_files) {
-            std::cout << "Processing: " << image_file.filename() << "... ";
+        LoadedImageTask loaded_task;
+        while (load_queue.pop(loaded_task)) {
+            std::cout << "Processing: " << loaded_task.image_file.filename() << "... ";
             std::cout.flush();
 
-            ProcessingResult result;
-            result.input_file = image_file;
+            if (!loaded_task.error.empty() || !loaded_task.image.has_value()) {
+                std::cerr << "FAILED: " << loaded_task.error << '\n';
+                failed_count.fetch_add(1);
+                continue;
+            }
 
             try {
-                const tgpu::ImageGray input = tgpu::load_grayscale_image_raw(image_file);
+                const tgpu::ImageGray& input = loaded_task.image.value();
                 if (!batch_initialized) {
                     tgpu::begin_pipeline_batch(input.width, input.height);
                     batch_initialized = true;
@@ -118,40 +251,34 @@ int run_directory_mode(const CliArguments& arguments) {
                         ", expected " + std::to_string(batch_width) + "x" + std::to_string(batch_height));
                 }
 
-                tgpu::PipelineRunOptions options = arguments.pipeline_options;
-                options.capture_intermediate_stages = arguments.dump_stages;
+                results[loaded_task.index].pipeline_result = tgpu::run_pipeline(input, options);
 
-                result.pipeline_result = tgpu::run_pipeline(input, options);
+                SaveImageTask save_task;
+                save_task.index = loaded_task.index;
+                save_task.image_file = loaded_task.image_file;
+                save_task.output_file = arguments.output_path / loaded_task.image_file.filename();
 
-                const std::filesystem::path output_file = arguments.output_path / image_file.filename();
-                tgpu::save_grayscale_image(output_file, result.pipeline_result.output, arguments.output_depth);
-
-                if (arguments.dump_stages) {
-                    const std::string extension = image_file.extension().string();
-                    const std::string extension_no_dot = extension.size() > 1 ? extension.substr(1) : "";
-                    const std::string subfolder_name = image_file.stem().string() + "_" + to_lower(extension_no_dot);
-                    const std::filesystem::path stage_dump_dir = arguments.stages_output_dir / subfolder_name;
-                    std::filesystem::create_directories(stage_dump_dir);
-
-                    for (const tgpu::PipelineStage& stage : result.pipeline_result.stages) {
-                        const std::filesystem::path stage_path = stage_dump_dir / format_stage_file_name(stage);
-                        tgpu::save_grayscale_image(stage_path, stage.image, arguments.output_depth);
-                    }
+                if (!save_queue.push(std::move(save_task))) {
+                    throw std::runtime_error("save queue closed unexpectedly");
                 }
 
-                result.success = true;
                 std::cout << "OK\n";
             } catch (const std::exception& error) {
                 std::cerr << "FAILED: " << error.what() << '\n';
-                result.success = false;
-                failed_count++;
+                failed_count.fetch_add(1);
             }
-
-            results.push_back(std::move(result));
         }
 
         if (batch_initialized) {
             tgpu::end_pipeline_batch();
+        }
+
+        save_queue.close();
+        if (load_thread.joinable()) {
+            load_thread.join();
+        }
+        if (save_thread.joinable()) {
+            save_thread.join();
         }
 
         std::cout << "\n";
@@ -159,8 +286,9 @@ int run_directory_mode(const CliArguments& arguments) {
             print_mean_benchmark_report(results, arguments.pipeline_options);
         }
 
-        if (failed_count > 0) {
-            std::cout << "\n" << failed_count << " image(s) failed to process.\n";
+        const int total_failures = failed_count.load();
+        if (total_failures > 0) {
+            std::cout << "\n" << total_failures << " image(s) failed to process.\n";
             return 1;
         }
     } catch (const std::exception& error) {
