@@ -8,6 +8,8 @@ namespace tgpu
 {
     namespace
     {
+        constexpr float kEarlyRejectExponent = 12.0F;
+
         __global__ void non_local_means_kernel(
             const float *input,
             float *output,
@@ -24,8 +26,10 @@ namespace tgpu
                 return;
             }
 
-            const float center_value = input[expanded_index(x, y, expanded_width)];
+            const std::size_t center_index = expanded_index(x, y, expanded_width);
+            const float center_value = input[center_index];
             const float filter_strength_squared = filter_strength * filter_strength;
+            const float early_reject_distance = kEarlyRejectExponent * filter_strength_squared;
 
             float weighted_sum = 0.0F;
             float total_weight = 0.0F;
@@ -42,6 +46,15 @@ namespace tgpu
 
                     const int neighbor_x = clamp_coordinate(x + offset_x, expanded_width);
                     const int neighbor_y = clamp_coordinate(y + offset_y, expanded_height);
+                    const std::size_t neighbor_index = expanded_index(neighbor_x, neighbor_y, expanded_width);
+                    const float neighbor_value = input[neighbor_index];
+
+                    const float center_difference = center_value - neighbor_value;
+                    const float center_distance = center_difference * center_difference;
+                    if (center_distance > early_reject_distance)
+                    {
+                        continue;
+                    }
 
                     float patch_distance = 0.0F;
                     for (int patch_y = -patch_radius; patch_y <= patch_radius; ++patch_y)
@@ -62,7 +75,7 @@ namespace tgpu
 
                     const float weight = expf(-patch_distance / filter_strength_squared);
                     self_weight = weight > self_weight ? weight : self_weight;
-                    weighted_sum += weight * input[expanded_index(neighbor_x, neighbor_y, expanded_width)];
+                    weighted_sum += weight * neighbor_value;
                     total_weight += weight;
                 }
             }
