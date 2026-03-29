@@ -1,6 +1,8 @@
 // Owns GPU pipeline orchestration, stage sequencing, and generic passthrough helpers.
 
 #include "detail/runtime.hpp"
+#include "detail/pipeline_api.hpp"
+#include "detail/stage_definition.hpp"
 
 #include <chrono>
 #include <optional>
@@ -29,19 +31,6 @@ namespace tgpu
             const auto end = Clock::now();
             return std::chrono::duration<double, std::milli>(end - begin).count();
         }
-
-        struct StageDefinition
-        {
-            std::uint32_t prefix;
-            std::string_view name;
-        };
-
-        constexpr StageDefinition kPipelineStages[] = {
-            {10, "non_local_means"},
-            {20, "unsharp_mask"},
-            {30, "richardson_lucy"},
-            {40, "histogram_stretch"},
-        };
 
         struct BatchPipelineContext
         {
@@ -127,7 +116,7 @@ namespace tgpu
                 options.stage_execution.non_local_means,
                 [&]() { run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means); },
                 result.benchmark.non_local_means_ms,
-                kPipelineStages[0].prefix, kPipelineStages[0].name,
+                gpu::detail::kPipelineStages[0].capture_prefix, gpu::detail::kPipelineStages[0].name,
                 "benchmark non_local_means synchronize");
 
             // Execute Unsharp Mask stage
@@ -136,7 +125,7 @@ namespace tgpu
                 options.stage_execution.unsharp_mask,
                 [&]() { run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask); },
                 result.benchmark.unsharp_mask_ms,
-                kPipelineStages[1].prefix, kPipelineStages[1].name,
+                gpu::detail::kPipelineStages[1].capture_prefix, gpu::detail::kPipelineStages[1].name,
                 "benchmark unsharp_mask synchronize");
 
             // Execute Richardson-Lucy stage
@@ -145,7 +134,7 @@ namespace tgpu
                 options.stage_execution.richardson_lucy,
                 [&]() { run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy); },
                 result.benchmark.richardson_lucy_ms,
-                kPipelineStages[2].prefix, kPipelineStages[2].name,
+                gpu::detail::kPipelineStages[2].capture_prefix, gpu::detail::kPipelineStages[2].name,
                 "benchmark richardson_lucy synchronize");
 
             // Execute Histogram Stretch stage
@@ -154,7 +143,7 @@ namespace tgpu
                 options.stage_execution.histogram_stretch,
                 [&]() { run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch); },
                 result.benchmark.histogram_stretch_ms,
-                kPipelineStages[3].prefix, kPipelineStages[3].name,
+                gpu::detail::kPipelineStages[3].capture_prefix, gpu::detail::kPipelineStages[3].name,
                 "benchmark histogram_stretch synchronize");
 
             // Download result

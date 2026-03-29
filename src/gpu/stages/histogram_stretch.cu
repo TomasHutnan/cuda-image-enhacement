@@ -1,7 +1,7 @@
 // Histogram stretch stage based on percentile clipping in normalized [0, 1] space.
 
 #include "detail/runtime.hpp"
-#include "detail/kernel_grid.hpp"
+#include "detail/compute.hpp"
 
 #include <cmath>
 #include <limits>

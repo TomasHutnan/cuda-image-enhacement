@@ -1,7 +1,7 @@
 // Contains the non-local means stage implementation and stage-local kernels.
 
 #include "detail/runtime.hpp"
-#include "detail/kernel_grid.hpp"
+#include "detail/compute.hpp"
 
 #include <cmath>
 

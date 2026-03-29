@@ -1,7 +1,7 @@
 // Unsharp mask (Gaussian blur + enhancement) stage implementation.
 
 #include "detail/runtime.hpp"
-#include "detail/kernel_grid.hpp"
+#include "detail/compute.hpp"
 #include "detail/kernel_cache.hpp"
 
 #include <array>

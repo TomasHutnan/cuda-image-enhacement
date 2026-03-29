@@ -1,8 +1,9 @@
 // Richardson-Lucy iterative blind deconvolution stage implementation.
 
 #include "detail/runtime.hpp"
-#include "detail/kernel_grid.hpp"
+#include "detail/compute.hpp"
 #include "detail/kernel_cache.hpp"
+#include "detail/pipeline_api.hpp"
 
 #include <array>
 #include <cmath>
