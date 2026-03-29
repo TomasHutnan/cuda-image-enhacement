@@ -25,17 +25,42 @@ class StagePair:
     second_path: Path
 
 
-def _load_display_bgr(path: Path) -> np.ndarray:
+def _load_grayscale_f32(path: Path) -> np.ndarray:
     image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise RuntimeError(f"Failed to read image: {path}")
     if image.ndim != 2:
         raise ValueError(f"Expected grayscale stage image: {path}")
     if image.dtype == np.uint16:
-        image = (image / 257.0).astype(np.uint8)
+        return image.astype(np.float32) / 65535.0
+    if image.dtype == np.uint8:
+        return image.astype(np.float32) / 255.0
     elif np.issubdtype(image.dtype, np.floating):
-        image = (np.clip(image.astype(np.float32), 0.0, 1.0) * 255.0).astype(np.uint8)
-    return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        return np.clip(image.astype(np.float32), 0.0, 1.0)
+    raise ValueError(f"Unsupported grayscale stage image dtype: {image.dtype} ({path})")
+
+
+def _display_bgr_from_f32(image: np.ndarray) -> np.ndarray:
+    image_u8 = (np.clip(image, 0.0, 1.0) * 255.0).astype(np.uint8)
+    return cv2.cvtColor(image_u8, cv2.COLOR_GRAY2BGR)
+
+
+def _load_display_bgr(path: Path) -> np.ndarray:
+    return _display_bgr_from_f32(_load_grayscale_f32(path))
+
+
+def _make_diff_display_bgr(first_path: Path, second_path: Path) -> np.ndarray:
+    first = _load_grayscale_f32(first_path)
+    second = _load_grayscale_f32(second_path)
+
+    if first.shape != second.shape:
+        raise ValueError(f"Mismatched stage image shapes: {first_path} vs {second_path}")
+
+    diff = np.abs(first - second)
+    max_diff = float(diff.max())
+    if max_diff > 0.0:
+        diff = diff / max_diff
+    return _display_bgr_from_f32(diff)
 
 
 def _fit_inside(image: np.ndarray, max_w: int, max_h: int) -> np.ndarray:
@@ -79,7 +104,7 @@ def _text(canvas: np.ndarray, text: str, pos: tuple[int, int], scale: float, col
 
 
 def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index: int, total: int) -> np.ndarray:
-    panel_w = (_DEFAULT_W - 20) // 2 - 10
+    panel_w = (_DEFAULT_W - 40) // 3
     panel_h = _DEFAULT_H - 84
 
     def make_panel(path: Path, label: str) -> np.ndarray:
@@ -90,8 +115,19 @@ def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index:
         _text(panel, label, (10, 28), 0.7, (230, 230, 230), 2)
         return panel
 
-    left, right = make_panel(pair.first_path, first_name), make_panel(pair.second_path, second_name)
-    canvas = np.concatenate([left, np.zeros((left.shape[0], 20, 3), dtype=np.uint8), right], axis=1)
+    def make_diff_panel() -> np.ndarray:
+        img = _fit_inside(_make_diff_display_bgr(pair.first_path, pair.second_path), panel_w, panel_h)
+        ih, iw = img.shape[:2]
+        panel = np.zeros((panel_h + 44, panel_w, 3), dtype=np.uint8)
+        panel[44 + (panel_h - ih) // 2:44 + (panel_h + ih) // 2, (panel_w - iw) // 2:(panel_w + iw) // 2] = img
+        _text(panel, "diff |py-cpp| (auto)", (10, 28), 0.62, (230, 230, 230), 2)
+        return panel
+
+    left = make_panel(pair.first_path, first_name)
+    mid = make_panel(pair.second_path, second_name)
+    right = make_diff_panel()
+    gap = np.zeros((left.shape[0], 20, 3), dtype=np.uint8)
+    canvas = np.concatenate([left, gap, mid, gap, right], axis=1)
     _text(canvas, f"{pair.file_name}  ({index + 1}/{total})", (10, canvas.shape[0] - 28), 0.65, (0, 210, 255), 2)
     _text(canvas, "Left/Right: prev/next stage  |  Q / Esc: quit", (10, canvas.shape[0] - 8), 0.5, (180, 180, 180))
     return canvas
@@ -100,7 +136,7 @@ def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index:
 def _make_grid_canvas(pairs: list[StagePair], first_name: str, second_name: str, slot_w: int = 300, slot_h: int = 220) -> np.ndarray:
     STAGE_H, BAR_H, FOOTER_H, GAP = 20, 32, 28, 10
     n = len(pairs)
-    col_h = STAGE_H + (BAR_H + slot_h) * 2
+    col_h = STAGE_H + (BAR_H + slot_h) * 3
     canvas = np.zeros((col_h + FOOTER_H, n * slot_w + (n - 1) * GAP, 3), dtype=np.uint8)
 
     for col, pair in enumerate(pairs):
@@ -114,6 +150,14 @@ def _make_grid_canvas(pairs: list[StagePair], first_name: str, second_name: str,
         r2_img_y = r1_img_y + slot_h + BAR_H
         _text(canvas, second_name, (x + 4, r1_img_y + slot_h + BAR_H - 10), 0.42, (220, 220, 220))
         canvas[r2_img_y:r2_img_y + slot_h, x:x + slot_w] = _fit_to_frame(_load_display_bgr(pair.second_path), slot_w, slot_h)
+
+        r3_img_y = r2_img_y + slot_h + BAR_H
+        _text(canvas, "diff |py-cpp| (auto)", (x + 4, r2_img_y + slot_h + BAR_H - 10), 0.42, (220, 220, 220))
+        canvas[r3_img_y:r3_img_y + slot_h, x:x + slot_w] = _fit_to_frame(
+            _make_diff_display_bgr(pair.first_path, pair.second_path),
+            slot_w,
+            slot_h,
+        )
 
     _text(canvas, "Q or Esc: quit", (4, canvas.shape[0] - 8), 0.45, (180, 180, 180))
     return canvas
