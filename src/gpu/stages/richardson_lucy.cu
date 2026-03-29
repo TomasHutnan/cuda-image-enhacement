@@ -42,8 +42,31 @@ namespace tgpu
             int radius,
             int kernel_size)
         {
-            const int x = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x) + static_cast<int>(threadIdx.x);
-            const int y = static_cast<int>(blockIdx.y) * static_cast<int>(blockDim.y) + static_cast<int>(threadIdx.y);
+            extern __shared__ float tile[];
+
+            const int local_x = static_cast<int>(threadIdx.x);
+            const int local_y = static_cast<int>(threadIdx.y);
+            const int base_x = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x);
+            const int base_y = static_cast<int>(blockIdx.y) * static_cast<int>(blockDim.y);
+            const int x = base_x + local_x;
+            const int y = base_y + local_y;
+
+            const int tile_width = static_cast<int>(blockDim.x) + 2 * radius;
+            const int tile_height = static_cast<int>(blockDim.y) + 2 * radius;
+            const int thread_linear = local_y * static_cast<int>(blockDim.x) + local_x;
+            const int thread_count = static_cast<int>(blockDim.x) * static_cast<int>(blockDim.y);
+            const int tile_count = tile_width * tile_height;
+
+            for (int index = thread_linear; index < tile_count; index += thread_count)
+            {
+                const int tile_x = index % tile_width;
+                const int tile_y = index / tile_width;
+                const int global_x = clamp_coordinate(base_x + tile_x - radius, expanded_width);
+                const int global_y = clamp_coordinate(base_y + tile_y - radius, expanded_height);
+                tile[index] = input[expanded_index(global_x, global_y, expanded_width)];
+            }
+            __syncthreads();
+
             if (x >= expanded_width || y >= expanded_height)
             {
                 return;
@@ -52,12 +75,13 @@ namespace tgpu
             float convolved = 0.0F;
             for (int kernel_y = 0; kernel_y < kernel_size; ++kernel_y)
             {
-                const int sample_y = clamp_coordinate(y + kernel_y - radius, expanded_height);
+                const int sample_y = local_y + kernel_y;
+                const int row_offset = sample_y * tile_width;
+                const int kernel_offset = kernel_y * kernel_size;
                 for (int kernel_x = 0; kernel_x < kernel_size; ++kernel_x)
                 {
-                    const int sample_x = clamp_coordinate(x + kernel_x - radius, expanded_width);
-                    const float weight = kPsf[kernel_y * kernel_size + kernel_x];
-                    convolved += weight * input[expanded_index(sample_x, sample_y, expanded_width)];
+                    const float weight = kPsf[kernel_offset + kernel_x];
+                    convolved += weight * tile[row_offset + local_x + kernel_x];
                 }
             }
 
@@ -90,8 +114,31 @@ namespace tgpu
             int radius,
             int kernel_size)
         {
-            const int x = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x) + static_cast<int>(threadIdx.x);
-            const int y = static_cast<int>(blockIdx.y) * static_cast<int>(blockDim.y) + static_cast<int>(threadIdx.y);
+            extern __shared__ float tile[];
+
+            const int local_x = static_cast<int>(threadIdx.x);
+            const int local_y = static_cast<int>(threadIdx.y);
+            const int base_x = static_cast<int>(blockIdx.x) * static_cast<int>(blockDim.x);
+            const int base_y = static_cast<int>(blockIdx.y) * static_cast<int>(blockDim.y);
+            const int x = base_x + local_x;
+            const int y = base_y + local_y;
+
+            const int tile_width = static_cast<int>(blockDim.x) + 2 * radius;
+            const int tile_height = static_cast<int>(blockDim.y) + 2 * radius;
+            const int thread_linear = local_y * static_cast<int>(blockDim.x) + local_x;
+            const int thread_count = static_cast<int>(blockDim.x) * static_cast<int>(blockDim.y);
+            const int tile_count = tile_width * tile_height;
+
+            for (int index = thread_linear; index < tile_count; index += thread_count)
+            {
+                const int tile_x = index % tile_width;
+                const int tile_y = index / tile_width;
+                const int global_x = clamp_coordinate(base_x + tile_x - radius, expanded_width);
+                const int global_y = clamp_coordinate(base_y + tile_y - radius, expanded_height);
+                tile[index] = ratio[expanded_index(global_x, global_y, expanded_width)];
+            }
+            __syncthreads();
+
             if (x >= expanded_width || y >= expanded_height)
             {
                 return;
@@ -100,12 +147,13 @@ namespace tgpu
             float correction = 0.0F;
             for (int kernel_y = 0; kernel_y < kernel_size; ++kernel_y)
             {
-                const int sample_y = clamp_coordinate(y + kernel_y - radius, expanded_height);
+                const int sample_y = local_y + kernel_y;
+                const int row_offset = sample_y * tile_width;
+                const int kernel_offset = kernel_y * kernel_size;
                 for (int kernel_x = 0; kernel_x < kernel_size; ++kernel_x)
                 {
-                    const int sample_x = clamp_coordinate(x + kernel_x - radius, expanded_width);
-                    const float weight = kPsf[kernel_y * kernel_size + kernel_x];
-                    correction += weight * ratio[expanded_index(sample_x, sample_y, expanded_width)];
+                    const float weight = kPsf[kernel_offset + kernel_x];
+                    correction += weight * tile[row_offset + local_x + kernel_x];
                 }
             }
 
@@ -196,6 +244,9 @@ namespace tgpu
             static_cast<unsigned int>((workspace.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
                                       static_cast<int>(kImageBlockSize.y)),
             1};
+        const int tile_width = static_cast<int>(kImageBlockSize.x) + 2 * radius;
+        const int tile_height = static_cast<int>(kImageBlockSize.y) + 2 * radius;
+        const std::size_t shared_tile_bytes = static_cast<std::size_t>(tile_width * tile_height) * sizeof(float);
 
         throw_if_cuda_failed(
             cudaMemcpy(
@@ -207,7 +258,7 @@ namespace tgpu
 
         for (int iteration = 0; iteration < options.iterations; ++iteration)
         {
-            psf_convolution_kernel<<<grid_size, kImageBlockSize>>>(
+            psf_convolution_kernel<<<grid_size, kImageBlockSize, shared_tile_bytes>>>(
                 workspace.output,
                 workspace.auxiliary,
                 workspace.expanded_width,
@@ -224,7 +275,7 @@ namespace tgpu
                 options.epsilon);
             throw_if_kernel_failed("richardson-lucy ratio");
 
-            backward_update_kernel<<<grid_size, kImageBlockSize>>>(
+            backward_update_kernel<<<grid_size, kImageBlockSize, shared_tile_bytes>>>(
                 workspace.auxiliary,
                 workspace.output,
                 workspace.expanded_width,
