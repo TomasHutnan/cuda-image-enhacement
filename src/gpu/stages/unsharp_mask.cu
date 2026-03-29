@@ -1,6 +1,8 @@
-// Placeholder for the unsharp mask stage until the CUDA implementation is added.
+// Unsharp mask (Gaussian blur + enhancement) stage implementation.
 
 #include "detail/runtime.hpp"
+#include "detail/kernel_grid.hpp"
+#include "detail/kernel_cache.hpp"
 
 #include <array>
 #include <cmath>
@@ -9,29 +11,49 @@ namespace tgpu
 {
     namespace
     {
+        /// Maximum Gaussian kernel half-width in pixels.
+        /// radius = ceil(3 * sigma); clamped to [1, kMaxGaussianRadius]
         constexpr int kMaxGaussianRadius = 64;
         constexpr int kMaxGaussianKernelSize = 2 * kMaxGaussianRadius + 1;
 
         __constant__ float kGaussianWeights[kMaxGaussianKernelSize];
 
-        struct GaussianKernelCache
+        /// Unsharp mask: Gaussian blur + contrast enhancement.
+        /// Algorithm:
+        /// 1. Compute Gaussian blur (separable: horizontal then vertical)
+        /// 2. Compute unsharp enhance: output = original + amount * (original - blurred)
+        /// 3. Output clamped to [0.0, 1.0]
+        ///
+        /// Enhancement amount controls strength; typical: 0.6
+        /// Sigma controls blur width; typical: 1.667
+        
+        // Global cache for Gaussian kernel weights (device constant memory)
+        gpu::detail::KernelCache<float, kMaxGaussianKernelSize> g_gaussian_cache;
+        
+        // Helper to compute Gaussian kernel weights on host
+        void compute_gaussian_kernel(int radius, float sigma, std::array<float, kMaxGaussianKernelSize>& weights)
         {
-            bool valid = false;
-            float sigma = 0.0F;
-            int radius = 0;
-            int kernel_size = 0;
-            std::array<float, kMaxGaussianKernelSize> weights{};
-        };
+            float weight_sum = 0.0F;
+            const int kernel_size = 2 * radius + 1;
+            const float sigma_squared = sigma * sigma;
 
-        GaussianKernelCache &gaussian_kernel_cache()
-        {
-            static GaussianKernelCache cache;
-            return cache;
-        }
+            for (int index = 0; index < kernel_size; ++index)
+            {
+                const int offset = index - radius;
+                const float distance_squared = static_cast<float>(offset * offset);
+                const float weight = expf(-distance_squared / (2.0F * sigma_squared));
+                weights[static_cast<std::size_t>(index)] = weight;
+                weight_sum += weight;
+            }
 
-        bool same_sigma(float lhs, float rhs)
-        {
-            return fabsf(lhs - rhs) <= 1.0e-6F;
+            // Normalize
+            if (weight_sum > 0.0F)
+            {
+                for (int index = 0; index < kernel_size; ++index)
+                {
+                    weights[static_cast<std::size_t>(index)] /= weight_sum;
+                }
+            }
         }
 
         __global__ void gaussian_horizontal_kernel(
@@ -92,78 +114,54 @@ namespace tgpu
 
     void run_unsharp_mask_stage(const StageWorkspace &workspace, const UnsharpMaskOptions &options)
     {
+        if (!options.enabled)
+        {
+            run_passthrough_stage(workspace, "unsharp mask disabled");
+            return;
+        }
+
+        // Validate parameters
         if (!std::isfinite(options.sigma) || options.sigma <= 0.0F)
         {
-            run_passthrough_stage(workspace, "unsharp mask invalid sigma");
+            run_passthrough_stage(workspace, "Unsharp: sigma must be > 0.0 and finite");
             return;
         }
 
-        if (!std::isfinite(options.amount))
+        if (!std::isfinite(options.amount) || fabsf(options.amount) <= 1.0e-6F)
         {
-            run_passthrough_stage(workspace, "unsharp mask invalid amount");
+            run_passthrough_stage(workspace, "Unsharp: amount must be non-zero and finite");
             return;
         }
 
-        if (fabsf(options.amount) <= 1.0e-6F)
-        {
-            run_passthrough_stage(workspace, "unsharp mask zero amount");
-            return;
-        }
-
+        // Compute kernel parameters
         const int radius = std::clamp(static_cast<int>(ceilf(3.0F * options.sigma)), 1, kMaxGaussianRadius);
         const int kernel_size = 2 * radius + 1;
 
-        GaussianKernelCache &cache = gaussian_kernel_cache();
-        const bool cache_hit =
-            cache.valid && cache.radius == radius && cache.kernel_size == kernel_size && same_sigma(cache.sigma, options.sigma);
-        if (!cache_hit)
+        // Check/update cache
+        if (!g_gaussian_cache.is_valid(options.sigma, radius))
         {
-            float weight_sum = 0.0F;
-            const float sigma_squared = options.sigma * options.sigma;
+            std::array<float, kMaxGaussianKernelSize> weights{};
+            compute_gaussian_kernel(radius, options.sigma, weights);
 
-            for (int index = 0; index < kernel_size; ++index)
+            if (weights[0] <= 0.0F)  // Sanity check (shouldn't happen if normalize succeeded)
             {
-                const int offset = index - radius;
-                const float distance_squared = static_cast<float>(offset * offset);
-                const float weight = expf(-distance_squared / (2.0F * sigma_squared));
-                cache.weights[static_cast<std::size_t>(index)] = weight;
-                weight_sum += weight;
-            }
-
-            if (weight_sum <= 0.0F)
-            {
-                run_passthrough_stage(workspace, "unsharp mask degenerate kernel");
+                run_passthrough_stage(workspace, "Unsharp: degenerate Gaussian kernel");
                 return;
             }
 
-            for (int index = 0; index < kernel_size; ++index)
-            {
-                cache.weights[static_cast<std::size_t>(index)] /= weight_sum;
-            }
-
-            cache.valid = true;
-            cache.sigma = options.sigma;
-            cache.radius = radius;
-            cache.kernel_size = kernel_size;
-
-            throw_if_cuda_failed(
-                cudaMemcpyToSymbol(
-                    kGaussianWeights,
-                    cache.weights.data(),
-                    static_cast<std::size_t>(kernel_size) * sizeof(float),
-                    0,
-                    cudaMemcpyHostToDevice),
-                "cudaMemcpyToSymbol unsharp gaussian weights");
+            g_gaussian_cache.update(options.sigma, radius, weights.data(), (void*)kGaussianWeights, kernel_size);
         }
 
-        const dim3 grid_size{
-            static_cast<unsigned int>((workspace.expanded_width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((workspace.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        // Use standardized grid calculation
+        const dim3 grid_size = gpu::detail::compute_2d_grid(
+            workspace.expanded_width,
+            workspace.expanded_height,
+            gpu::detail::block_sizes::kImage2D_X,
+            gpu::detail::block_sizes::kImage2D_Y);
 
-        gaussian_horizontal_kernel<<<grid_size, kImageBlockSize>>>(
+        // Horizontal blur pass
+        gaussian_horizontal_kernel<<<grid_size, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                       gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
             workspace.input,
             workspace.auxiliary,
             workspace.expanded_width,
@@ -171,7 +169,9 @@ namespace tgpu
             radius);
         throw_if_kernel_failed("unsharp mask horizontal gaussian");
 
-        gaussian_vertical_unsharp_kernel<<<grid_size, kImageBlockSize>>>(
+        // Vertical blur + enhancement pass
+        gaussian_vertical_unsharp_kernel<<<grid_size, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                             gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
             workspace.input,
             workspace.auxiliary,
             workspace.output,

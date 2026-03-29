@@ -83,6 +83,34 @@ namespace tgpu
             }
         }
 
+        // Helper to execute a stage with optional benchmarking and capture
+        template <typename StageFunc>
+        void execute_stage_with_capture(
+            PipelineRunResult &result,
+            DevicePipeline &pipeline,
+            const PipelineRunOptions &options,
+            bool enabled,
+            StageFunc &&stage_func,
+            double &benchmark_ms_out,
+            std::uint32_t stage_prefix,
+            std::string_view stage_name,
+            const char *sync_operation)
+        {
+            if (enabled)
+            {
+                if (options.collect_benchmark)
+                {
+                    benchmark_ms_out = timed_stage_ms(stage_func, sync_operation);
+                }
+                else
+                {
+                    stage_func();
+                }
+                commit_stage_output(pipeline);
+            }
+            capture_stage_if_requested(result, options, pipeline, stage_prefix, stage_name, pipeline.current);
+        }
+
         PipelineRunResult finalize_pipeline(DevicePipeline &pipeline, const PipelineRunOptions &options)
         {
             PipelineRunResult result;
@@ -93,70 +121,43 @@ namespace tgpu
 
             capture_stage_if_requested(result, options, pipeline, 0, "input_normalized", pipeline.current);
 
-            if (options.stage_execution.non_local_means)
-            {
-                if (options.collect_benchmark)
-                {
-                    result.benchmark.non_local_means_ms = timed_stage_ms([&]() {
-                        run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
-                    }, "benchmark non_local_means synchronize");
-                }
-                else
-                {
-                    run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
-                }
-                commit_stage_output(pipeline);
-            }
-            capture_stage_if_requested(result, options, pipeline, kPipelineStages[0].prefix, kPipelineStages[0].name, pipeline.current);
+            // Execute Non-Local Means stage
+            execute_stage_with_capture(
+                result, pipeline, options,
+                options.stage_execution.non_local_means,
+                [&]() { run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means); },
+                result.benchmark.non_local_means_ms,
+                kPipelineStages[0].prefix, kPipelineStages[0].name,
+                "benchmark non_local_means synchronize");
 
-            if (options.stage_execution.unsharp_mask)
-            {
-                if (options.collect_benchmark)
-                {
-                    result.benchmark.unsharp_mask_ms = timed_stage_ms([&]() {
-                        run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask);
-                    }, "benchmark unsharp_mask synchronize");
-                }
-                else
-                {
-                    run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask);
-                }
-                commit_stage_output(pipeline);
-            }
-            capture_stage_if_requested(result, options, pipeline, kPipelineStages[1].prefix, kPipelineStages[1].name, pipeline.current);
+            // Execute Unsharp Mask stage
+            execute_stage_with_capture(
+                result, pipeline, options,
+                options.stage_execution.unsharp_mask,
+                [&]() { run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask); },
+                result.benchmark.unsharp_mask_ms,
+                kPipelineStages[1].prefix, kPipelineStages[1].name,
+                "benchmark unsharp_mask synchronize");
 
-            if (options.stage_execution.richardson_lucy)
-            {
-                if (options.collect_benchmark)
-                {
-                    result.benchmark.richardson_lucy_ms = timed_stage_ms([&]() {
-                        run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
-                    }, "benchmark richardson_lucy synchronize");
-                }
-                else
-                {
-                    run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
-                }
-                commit_stage_output(pipeline);
-            }
-            capture_stage_if_requested(result, options, pipeline, kPipelineStages[2].prefix, kPipelineStages[2].name, pipeline.current);
+            // Execute Richardson-Lucy stage
+            execute_stage_with_capture(
+                result, pipeline, options,
+                options.stage_execution.richardson_lucy,
+                [&]() { run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy); },
+                result.benchmark.richardson_lucy_ms,
+                kPipelineStages[2].prefix, kPipelineStages[2].name,
+                "benchmark richardson_lucy synchronize");
 
-            if (options.stage_execution.histogram_stretch)
-            {
-                if (options.collect_benchmark)
-                {
-                    result.benchmark.histogram_stretch_ms = timed_stage_ms([&]() {
-                        run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch);
-                    }, "benchmark histogram_stretch synchronize");
-                }
-                else
-                {
-                    run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch);
-                }
-                commit_stage_output(pipeline);
-            }
-            capture_stage_if_requested(result, options, pipeline, kPipelineStages[3].prefix, kPipelineStages[3].name, pipeline.current);
+            // Execute Histogram Stretch stage
+            execute_stage_with_capture(
+                result, pipeline, options,
+                options.stage_execution.histogram_stretch,
+                [&]() { run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch); },
+                result.benchmark.histogram_stretch_ms,
+                kPipelineStages[3].prefix, kPipelineStages[3].name,
+                "benchmark histogram_stretch synchronize");
 
+            // Download result
             if (options.collect_benchmark)
             {
                 result.benchmark.device_to_host_ms = timed_ms([&]() {
