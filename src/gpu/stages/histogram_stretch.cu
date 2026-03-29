@@ -1,6 +1,7 @@
 // Histogram stretch stage based on percentile clipping in normalized [0, 1] space.
 
 #include "detail/runtime.hpp"
+#include "detail/compute.hpp"
 
 #include <cmath>
 #include <limits>
@@ -92,34 +93,49 @@ namespace tgpu
             return;
         }
 
+        // Validate parameters
+        if (options.saturation_percent < 0.0F || options.saturation_percent >= 50.0F)
+        {
+            run_passthrough_stage(workspace, "Histogram: saturation_percent must be in [0, 50)");
+            return;
+        }
+
+        if (options.bin_count < 64)
+        {
+            run_passthrough_stage(workspace, "Histogram: bin_count must be >= 64");
+            return;
+        }
+
         const float saturation_percent = std::min(std::max(options.saturation_percent, 0.0F), 49.9F);
         const std::size_t expanded_element_count =
             static_cast<std::size_t>(workspace.expanded_width) * static_cast<std::size_t>(workspace.expanded_height);
 
+        // Query device shared memory limit and compute safe bin count
         int max_shared_memory_bytes = 0;
         throw_if_cuda_failed(
             cudaDeviceGetAttribute(&max_shared_memory_bytes, cudaDevAttrMaxSharedMemoryPerBlock, 0),
             "cudaDeviceGetAttribute max shared memory");
+        
+        // Constrain bins by both shared memory and workspace buffer limits
         const int max_bins_by_shared = std::max(max_shared_memory_bytes / static_cast<int>(sizeof(unsigned int)), 1);
         const int max_bins_by_workspace =
             static_cast<int>(std::min(expanded_element_count, static_cast<std::size_t>(std::numeric_limits<int>::max())));
         const int max_bins = std::max(std::min(max_bins_by_shared, max_bins_by_workspace), 1);
-
-        const int bins = std::min(std::max(options.histogram_bins, 64), max_bins);
+        const int bins = std::min(std::max(options.bin_count, 64), max_bins);
 
         auto *device_histogram = reinterpret_cast<unsigned int *>(workspace.auxiliary);
         throw_if_cuda_failed(
             cudaMemset(device_histogram, 0, static_cast<std::size_t>(bins) * sizeof(unsigned int)),
             "cudaMemset histogram bins");
 
-        const dim3 grid_size{
-            static_cast<unsigned int>((workspace.width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((workspace.height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        // Use standardized grid calculation for visible region histogram building
+        const dim3 grid_size = gpu::detail::compute_2d_grid(
+            workspace.width,
+            workspace.height);
 
-        histogram_visible_region_kernel<<<grid_size, kImageBlockSize, static_cast<std::size_t>(bins) * sizeof(unsigned int)>>>(
+        histogram_visible_region_kernel<<<grid_size, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                           gpu::detail::block_sizes::kImage2D_Y, 1),
+                                           static_cast<std::size_t>(bins) * sizeof(unsigned int)>>>(
             workspace.input,
             workspace.width,
             workspace.height,
@@ -175,11 +191,12 @@ namespace tgpu
             return;
         }
 
+        // Use standardized 1D grid for pixel-wise histogram stretch
         const std::size_t element_count = expanded_element_count;
-        const int block_count = static_cast<int>((element_count + static_cast<std::size_t>(kThreadsPerBlock) - 1) /
-                                                 static_cast<std::size_t>(kThreadsPerBlock));
+        const int block_count = gpu::detail::compute_1d_grid(
+            static_cast<int>(element_count));
 
-        apply_histogram_stretch_kernel<<<block_count, kThreadsPerBlock>>>(
+        apply_histogram_stretch_kernel<<<block_count, gpu::detail::block_sizes::kLinear>>>(
             workspace.input,
             workspace.output,
             element_count,

@@ -1,6 +1,9 @@
-// Placeholder for the Richardson-Lucy stage until the CUDA implementation is added.
+// Richardson-Lucy iterative blind deconvolution stage implementation.
 
 #include "detail/runtime.hpp"
+#include "detail/compute.hpp"
+#include "detail/kernel_cache.hpp"
+#include "detail/pipeline_api.hpp"
 
 #include <array>
 #include <cmath>
@@ -9,33 +12,57 @@ namespace tgpu
 {
     namespace
     {
+        /// Maximum PSF (Point Spread Function) kernel half-width.
+        /// Gaussian PSF: radius = ceil(3 * psf_sigma); clamped to [1, kMaxPsfRadius]
         constexpr int kMaxPsfRadius = 31;
         constexpr int kMaxPsfKernelSize = 2 * kMaxPsfRadius + 1;
         __constant__ float kPsf[kMaxPsfKernelSize];
 
-        struct PsfCache
-        {
-            bool valid = false;
-            float sigma = 0.0F;
-            int radius = 0;
-            std::array<float, kMaxPsfKernelSize> weights{};
-        };
-
-        PsfCache &psf_cache()
-        {
-            static PsfCache cache;
-            return cache;
-        }
-
-        bool same_sigma(float lhs, float rhs)
-        {
-            return fabsf(lhs - rhs) <= 1.0e-6F;
-        }
-
+        /// Richardson-Lucy blind deconvolution algorithm.
+        /// Iteratively sharpens image assuming Gaussian PSF blur.
+        /// Algorithm (per iteration i):
+        /// 1. Estimate convolved with PSF: O_i = Estimate * PSF
+        /// 2. Ratio: R_i = Observed / (O_i + epsilon)  [prevents division by zero]
+        /// 3. Transpose PSF correlation (flip kernel): PSF^T
+        /// 4. Estimate update: Estimate_{i+1} = Estimate_i * (R_i * PSF^T)
+        ///
+        /// More iterations → more deconvolution, risk of ringing artifacts.
+        /// Typical: 2-5 iterations; epsilon: 1e-7
+        
+        // Global PSF cache (device constant memory)
+        gpu::detail::KernelCache<float, kMaxPsfKernelSize> g_psf_cache;
+        
+        // Persistent scratch buffer for RL temp storage
         DeviceFloatBuffer &scratch_buffer_cache()
         {
             static DeviceFloatBuffer scratch;
             return scratch;
+        }
+
+        // Helper to compute normalized Gaussian PSF kernel on host
+        void compute_gaussian_psf(int radius, float sigma, std::array<float, kMaxPsfKernelSize>& weights)
+        {
+            float weight_sum = 0.0F;
+            const int kernel_size = 2 * radius + 1;
+            const float sigma_squared = sigma * sigma;
+
+            for (int index = 0; index < kernel_size; ++index)
+            {
+                const int offset = index - radius;
+                const float distance_squared = static_cast<float>(offset * offset);
+                const float weight = expf(-distance_squared / (2.0F * sigma_squared));
+                weights[static_cast<std::size_t>(index)] = weight;
+                weight_sum += weight;
+            }
+
+            // Normalize
+            if (weight_sum > 0.0F)
+            {
+                for (int index = 0; index < kernel_size; ++index)
+                {
+                    weights[static_cast<std::size_t>(index)] /= weight_sum;
+                }
+            }
         }
 
         __global__ void horizontal_convolution_kernel(
@@ -138,71 +165,56 @@ namespace tgpu
 
     void run_richardson_lucy_stage(const StageWorkspace &workspace, const RichardsonLucyOptions &options)
     {
+        if (!options.enabled)
+        {
+            run_passthrough_stage(workspace, "richardson-lucy disabled");
+            return;
+        }
+
+        // Validate parameters
         if (options.iterations <= 0)
         {
-            run_passthrough_stage(workspace, "richardson-lucy disabled iterations");
+            run_passthrough_stage(workspace, "RL: iterations must be >= 1");
             return;
         }
 
         if (!std::isfinite(options.psf_sigma) || options.psf_sigma <= 0.0F)
         {
-            run_passthrough_stage(workspace, "richardson-lucy invalid sigma");
+            run_passthrough_stage(workspace, "RL: psf_sigma must be > 0.0 and finite");
+            return;
+        }
+
+        if (options.psf_radius < 1)
+        {
+            run_passthrough_stage(workspace, "RL: psf_radius must be >= 1");
             return;
         }
 
         if (!std::isfinite(options.epsilon) || options.epsilon <= 0.0F)
         {
-            run_passthrough_stage(workspace, "richardson-lucy invalid epsilon");
+            run_passthrough_stage(workspace, "RL: epsilon must be > 0.0 and finite");
             return;
         }
 
         const int radius = std::clamp(options.psf_radius, 1, kMaxPsfRadius);
         const int kernel_size = 2 * radius + 1;
 
-        PsfCache &cache = psf_cache();
-        const bool cache_hit =
-            cache.valid &&
-            cache.radius == radius &&
-            same_sigma(cache.sigma, options.psf_sigma);
-        if (!cache_hit)
+        // Check/update PSF cache
+        if (!g_psf_cache.is_valid(options.psf_sigma, radius))
         {
-            float sum = 0.0F;
-            const float sigma_squared = options.psf_sigma * options.psf_sigma;
+            std::array<float, kMaxPsfKernelSize> weights{};
+            compute_gaussian_psf(radius, options.psf_sigma, weights);
 
-            for (int x = 0; x < kernel_size; ++x)
+            if (weights[0] <= 0.0F)  // Sanity check
             {
-                const int offset_x = x - radius;
-                const float distance_squared = static_cast<float>(offset_x * offset_x);
-                const float value = expf(-distance_squared / (2.0F * sigma_squared));
-                cache.weights[static_cast<std::size_t>(x)] = value;
-                sum += value;
-            }
-
-            if (sum <= 0.0F)
-            {
-                run_passthrough_stage(workspace, "richardson-lucy degenerate psf");
+                run_passthrough_stage(workspace, "RL: degenerate PSF kernel");
                 return;
             }
 
-            for (int index = 0; index < kernel_size; ++index)
-            {
-                cache.weights[static_cast<std::size_t>(index)] /= sum;
-            }
-
-            cache.valid = true;
-            cache.sigma = options.psf_sigma;
-            cache.radius = radius;
-
-            throw_if_cuda_failed(
-                cudaMemcpyToSymbol(
-                    kPsf,
-                    cache.weights.data(),
-                    static_cast<std::size_t>(kernel_size) * sizeof(float),
-                    0,
-                    cudaMemcpyHostToDevice),
-                "cudaMemcpyToSymbol richardson-lucy psf");
+            g_psf_cache.update(options.psf_sigma, radius, weights.data(), (void*)kPsf, kernel_size);
         }
 
+        // Allocate/reuse scratch buffer for iteration temporaries
         DeviceFloatBuffer &scratch_buffer = scratch_buffer_cache();
         const std::size_t element_count =
             static_cast<std::size_t>(workspace.expanded_width) * static_cast<std::size_t>(workspace.expanded_height);
@@ -211,15 +223,18 @@ namespace tgpu
             scratch_buffer = allocate_float_buffer(element_count);
         }
 
-        const int block_count = static_cast<int>(
-            (element_count + static_cast<std::size_t>(kThreadsPerBlock) - 1) / static_cast<std::size_t>(kThreadsPerBlock));
-        const dim3 grid_size{
-            static_cast<unsigned int>((workspace.expanded_width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((workspace.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        // Use standardized grid calculation
+        const dim3 grid_2d = gpu::detail::compute_2d_grid(
+            workspace.expanded_width,
+            workspace.expanded_height,
+            gpu::detail::block_sizes::kImage2D_X,
+            gpu::detail::block_sizes::kImage2D_Y);
 
+        const int block_count_1d = gpu::detail::compute_1d_grid(
+            static_cast<int>(element_count),
+            gpu::detail::block_sizes::kLinear);
+
+        // Initialize estimate from observed image
         throw_if_cuda_failed(
             cudaMemcpy(
                 workspace.output,
@@ -228,9 +243,12 @@ namespace tgpu
                 cudaMemcpyDeviceToDevice),
             "cudaMemcpy richardson-lucy initialize estimate");
 
+        // Iterative deconvolution loop
         for (int iteration = 0; iteration < options.iterations; ++iteration)
         {
-            horizontal_convolution_kernel<<<grid_size, kImageBlockSize>>>(
+            // Forward convolution: Estimate * PSF
+            horizontal_convolution_kernel<<<grid_2d, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                           gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
                 workspace.output,
                 workspace.auxiliary,
                 workspace.expanded_width,
@@ -238,7 +256,8 @@ namespace tgpu
                 radius);
             throw_if_kernel_failed("richardson-lucy forward horizontal convolution");
 
-            vertical_convolution_kernel<<<grid_size, kImageBlockSize>>>(
+            vertical_convolution_kernel<<<grid_2d, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                         gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
                 workspace.auxiliary,
                 scratch_buffer.data,
                 workspace.expanded_width,
@@ -246,7 +265,8 @@ namespace tgpu
                 radius);
             throw_if_kernel_failed("richardson-lucy forward vertical convolution");
 
-            ratio_kernel<<<block_count, kThreadsPerBlock>>>(
+            // Compute ratio: Observed / (Estimate * PSF + epsilon)
+            ratio_kernel<<<block_count_1d, gpu::detail::block_sizes::kLinear>>>(
                 workspace.input,
                 scratch_buffer.data,
                 scratch_buffer.data,
@@ -254,7 +274,9 @@ namespace tgpu
                 options.epsilon);
             throw_if_kernel_failed("richardson-lucy ratio");
 
-            horizontal_convolution_kernel<<<grid_size, kImageBlockSize>>>(
+            // Backward convolution: Ratio * PSF^T
+            horizontal_convolution_kernel<<<grid_2d, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                           gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
                 scratch_buffer.data,
                 workspace.auxiliary,
                 workspace.expanded_width,
@@ -262,7 +284,9 @@ namespace tgpu
                 radius);
             throw_if_kernel_failed("richardson-lucy backward horizontal convolution");
 
-            vertical_update_kernel<<<grid_size, kImageBlockSize>>>(
+            // Update estimate
+            vertical_update_kernel<<<grid_2d, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                    gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
                 workspace.auxiliary,
                 workspace.output,
                 workspace.expanded_width,

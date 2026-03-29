@@ -1,6 +1,7 @@
-// Uploads host images and prepares normalized, border-expanded GPU inputs.
+// Owns device buffer allocation, host input initialization, and output capture helpers.
 
 #include "detail/runtime.hpp"
+#include "detail/pipeline_api.hpp"
 
 namespace tgpu
 {
@@ -85,15 +86,65 @@ namespace tgpu
         }
     } // namespace
 
+    DeviceFloatBuffer allocate_float_buffer(std::size_t element_count)
+    {
+        DeviceFloatBuffer buffer;
+        buffer.element_count = element_count;
+        throw_if_cuda_failed(cudaMalloc(&buffer.data, element_count * sizeof(float)), "cudaMalloc float buffer");
+        return buffer;
+    }
+
+    DeviceByteBuffer upload_raw_image(const ImageGray &input)
+    {
+        DeviceByteBuffer buffer;
+        buffer.byte_count = input.data.size();
+        throw_if_cuda_failed(cudaMalloc(&buffer.data, buffer.byte_count), "cudaMalloc raw image buffer");
+        throw_if_cuda_failed(cudaMemcpy(buffer.data, input.data.data(), buffer.byte_count, cudaMemcpyHostToDevice),
+                             "cudaMemcpy raw image upload");
+        return buffer;
+    }
+
+    DeviceFloatBuffer upload_normalized_image(const ImageF32 &input)
+    {
+        DeviceFloatBuffer buffer = allocate_float_buffer(input.data.size());
+        throw_if_cuda_failed(
+            cudaMemcpy(
+                buffer.data,
+                input.data.data(),
+                input.data.size() * sizeof(float),
+                cudaMemcpyHostToDevice),
+            "cudaMemcpy normalized image upload");
+        return buffer;
+    }
+
+    DevicePipeline create_pipeline(int width, int height)
+    {
+        DevicePipeline pipeline;
+        pipeline.width = width;
+        pipeline.height = height;
+        pipeline.border = compute_border(width, height);
+        pipeline.expanded_width = width + 2 * pipeline.border;
+        pipeline.expanded_height = height + 2 * pipeline.border;
+
+        const std::size_t expanded_element_count =
+            static_cast<std::size_t>(pipeline.expanded_width) * static_cast<std::size_t>(pipeline.expanded_height);
+        pipeline.buffers[0] = allocate_float_buffer(expanded_element_count);
+        pipeline.buffers[1] = allocate_float_buffer(expanded_element_count);
+        pipeline.buffers[2] = allocate_float_buffer(expanded_element_count);
+        pipeline.current = pipeline.buffers[0].data;
+        pipeline.next = pipeline.buffers[1].data;
+        pipeline.scratch = pipeline.buffers[2].data;
+        return pipeline;
+    }
+
     void initialize_pipeline_from_raw(const ImageGray &input, DevicePipeline &pipeline)
     {
         const DeviceByteBuffer source = upload_raw_image(input);
-        const dim3 grid_size{
-            static_cast<unsigned int>((pipeline.expanded_width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((pipeline.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        const dim3 grid_size = gpu::detail::compute_2d_grid(
+            pipeline.expanded_width,
+            pipeline.expanded_height,
+            static_cast<int>(kImageBlockSize.x),
+            static_cast<int>(kImageBlockSize.y));
 
         if (input.bit_depth == BitDepth::u8)
         {
@@ -126,12 +177,11 @@ namespace tgpu
     void initialize_pipeline_from_normalized(const ImageF32 &input, DevicePipeline &pipeline)
     {
         const DeviceFloatBuffer source = upload_normalized_image(input);
-        const dim3 grid_size{
-            static_cast<unsigned int>((pipeline.expanded_width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((pipeline.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        const dim3 grid_size = gpu::detail::compute_2d_grid(
+            pipeline.expanded_width,
+            pipeline.expanded_height,
+            static_cast<int>(kImageBlockSize.x),
+            static_cast<int>(kImageBlockSize.y));
 
         pad_normalized_f32_kernel<<<grid_size, kImageBlockSize>>>(
             source.data,
@@ -144,4 +194,45 @@ namespace tgpu
             pipeline.current);
         throw_if_kernel_failed("pad normalized host input");
     }
+
+    ImageF32 download_visible_region(const DevicePipeline &pipeline, const float *source)
+    {
+        ImageF32 image;
+        image.width = pipeline.width;
+        image.height = pipeline.height;
+        image.stride = pipeline.width;
+        image.data.resize(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height));
+
+        const float *visible_source = source +
+                                      static_cast<std::size_t>(pipeline.border) * static_cast<std::size_t>(pipeline.expanded_width) +
+                                      static_cast<std::size_t>(pipeline.border);
+        throw_if_cuda_failed(
+            cudaMemcpy2D(
+                image.data.data(),
+                static_cast<std::size_t>(image.stride) * sizeof(float),
+                visible_source,
+                static_cast<std::size_t>(pipeline.expanded_width) * sizeof(float),
+                static_cast<std::size_t>(image.width) * sizeof(float),
+                static_cast<std::size_t>(image.height),
+                cudaMemcpyDeviceToHost),
+            "cudaMemcpy2D download visible image");
+        return image;
+    }
+
+    void capture_stage_if_requested(
+        PipelineRunResult &result,
+        const PipelineRunOptions &options,
+        const DevicePipeline &pipeline,
+        std::uint32_t prefix,
+        std::string_view name,
+        const float *source)
+    {
+        if (!options.capture_intermediate_stages)
+        {
+            return;
+        }
+
+        result.stages.push_back(PipelineStage{prefix, std::string{name}, download_visible_region(pipeline, source)});
+    }
+
 } // namespace tgpu

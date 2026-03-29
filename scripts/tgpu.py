@@ -100,9 +100,9 @@ def add_reference_subcommands(subparsers: argparse._SubParsersAction) -> None:
     )
     view_parser.add_argument(
         "--diff-mode",
-        choices=("auto", "raw"),
-        default="auto",
-        help="Initial difference-image mode: auto scales diff per stage, raw keeps absolute normalized magnitude",
+        choices=("auto", "raw", "percentile"),
+        default="percentile",
+        help="Initial difference-image mode: auto scales diff per stage, raw keeps absolute normalized magnitude, percentile computes a percentile histogram stretch",
     )
     view_parser.add_argument(
         "--stage",

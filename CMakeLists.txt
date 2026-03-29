@@ -34,9 +34,7 @@ add_library(tgpu_core
     src/common/image_io.cpp
     src/gpu/pipeline_gpu.cpp
     src/gpu/detail/pipeline.cu
-    src/gpu/detail/memory.cu
-    src/gpu/detail/input.cu
-    src/gpu/detail/capture.cu
+    src/gpu/detail/buffer_io.cu
     src/gpu/stages/non_local_means.cu
     src/gpu/stages/unsharp_mask.cu
     src/gpu/stages/richardson_lucy.cu
