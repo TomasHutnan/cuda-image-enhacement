@@ -1,6 +1,7 @@
 // Contains the non-local means stage implementation and stage-local kernels.
 
 #include "detail/runtime.hpp"
+#include "detail/kernel_grid.hpp"
 
 #include <cmath>
 
@@ -8,8 +9,25 @@ namespace tgpu
 {
     namespace
     {
+        /// Early rejection threshold exponent: skips patch computation if center pixel
+        /// difference exceeds kEarlyRejectExponent * filter_strength^2.
+        /// exp(-12) ≈ 6e-6, negligible weight; safe optimization for efficiency.
         constexpr float kEarlyRejectExponent = 12.0F;
 
+        /// Patch-based non-local denoising kernel.
+        /// For each pixel, searches nearby pixels for similar patches and computes
+        /// weighted average based on patch similarity. Early rejection on center-pixel
+        /// distance saves computation for dissimilar neighbors.
+        ///
+        /// Algorithm:
+        /// 1. For each pixel at (x,y):
+        /// 2.   For each candidate neighbor in [-search_radius, +search_radius]^2:
+        /// 3.     Compute center-pixel distance; skip if > early_reject_distance (early rejection)
+        /// 4.     Compute patch distance (sum of squared differences in patch region)
+        /// 5.     Weight = exp(-patch_distance / sigma^2)
+        /// 6.   Output = sum(weight * neighbor) / sum(weight) with self-weight adjustment
+        ///
+        /// Filter strength (sigma) controls noise assumption; higher = more aggressive denoising.
         __global__ void non_local_means_kernel(
             const float *input,
             float *output,
@@ -49,6 +67,7 @@ namespace tgpu
                     const std::size_t neighbor_index = expanded_index(neighbor_x, neighbor_y, expanded_width);
                     const float neighbor_value = input[neighbor_index];
 
+                    // Early rejection: skip if center pixels are too different
                     const float center_difference = center_value - neighbor_value;
                     const float center_distance = center_difference * center_difference;
                     if (center_distance > early_reject_distance)
@@ -56,6 +75,7 @@ namespace tgpu
                         continue;
                     }
 
+                    // Compute full patch distance
                     float patch_distance = 0.0F;
                     for (int patch_y = -patch_radius; patch_y <= patch_radius; ++patch_y)
                     {
@@ -85,16 +105,24 @@ namespace tgpu
 
             output[expanded_index(x, y, expanded_width)] = total_weight > 0.0F ? weighted_sum / total_weight : center_value;
         }
-    } // namespace
+    }  // namespace
 
     void run_non_local_means_stage(const StageWorkspace &workspace, const NonLocalMeansOptions &options)
     {
-        if (!options.enabled || options.search_radius <= 0)
+        if (!options.enabled)
         {
             run_passthrough_stage(workspace, "non-local means disabled");
             return;
         }
 
+        // Validate parameters
+        if (options.patch_size < 1 || options.search_radius < 0 || options.filter_strength <= 0.0F)
+        {
+            run_passthrough_stage(workspace, "NLM: invalid parameters (patch_size >= 1, search_radius >= 0, filter_strength > 0)");
+            return;
+        }
+
+        // Ensure patch_size is odd
         int patch_size = max(options.patch_size, 1);
         if ((patch_size % 2) == 0)
         {
@@ -105,14 +133,15 @@ namespace tgpu
         const int search_radius = max(options.search_radius, 0);
         const float filter_strength = options.filter_strength > 1.0e-6F ? options.filter_strength : 1.0e-6F;
 
-        const dim3 grid_size{
-            static_cast<unsigned int>((workspace.expanded_width + static_cast<int>(kImageBlockSize.x) - 1) /
-                                      static_cast<int>(kImageBlockSize.x)),
-            static_cast<unsigned int>((workspace.expanded_height + static_cast<int>(kImageBlockSize.y) - 1) /
-                                      static_cast<int>(kImageBlockSize.y)),
-            1};
+        // Use standardized grid calculation utility
+        const dim3 grid_size = gpu::detail::compute_2d_grid(
+            workspace.expanded_width,
+            workspace.expanded_height,
+            gpu::detail::block_sizes::kImage2D_X,
+            gpu::detail::block_sizes::kImage2D_Y);
 
-        non_local_means_kernel<<<grid_size, kImageBlockSize>>>(
+        non_local_means_kernel<<<grid_size, dim3(gpu::detail::block_sizes::kImage2D_X, 
+                                                   gpu::detail::block_sizes::kImage2D_Y, 1)>>>(
             workspace.input,
             workspace.output,
             workspace.expanded_width,
@@ -122,4 +151,4 @@ namespace tgpu
             filter_strength);
         throw_if_kernel_failed("non-local means stage");
     }
-} // namespace tgpu
+}  // namespace tgpu

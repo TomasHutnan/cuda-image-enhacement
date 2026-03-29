@@ -8,28 +8,53 @@
 
 namespace tgpu {
 
+/// Non-Local Means denoising options.
+/// Patch-based adaptive denoising algorithm.
 struct NonLocalMeansOptions {
+    /// Enable/disable this stage in the pipeline
     bool enabled = true;
+    /// Filter strength [0.0-1.0]; higher = more aggressive denoising; typical: 7/255 ≈ 0.027
     float filter_strength = 7.0F / 255.0F;
+    /// Patch size in pixels; must be odd [1, 9]; larger = slower but smoother results
     int patch_size = 3;
+    /// Search radius in pixels [1, 5]; larger = slower, more thorough; typical: 1-2
     int search_radius = 1;
 };
 
+/// Histogram stretch (percentile-based contrast enhancement) options.
+/// Stretches intensity range based on visible image percentiles.
 struct HistogramStretchOptions {
+    /// Enable/disable this stage in the pipeline
     bool enabled = true;
+    /// Saturation percentage [0.0-50.0]; typical: 0.5; % of dark/bright pixels to clip
     float saturation_percent = 0.5F;
-    int histogram_bins = 4096;
+    /// Histogram bin count [256, 65536]; typical: 4096; higher = finer precision, more memory
+    int bin_count = 4096;
 };
 
+/// Unsharp mask (Gaussian blur + enhancement) options.
+/// Enhances edges by subtracting blurred image from original.
 struct UnsharpMaskOptions {
+    /// Enable/disable this stage in the pipeline
+    bool enabled = true;
+    /// Gaussian standard deviation [0.5, 5.0]; typical: 1.67; affects blur radius
     float sigma = 1.6666667F;
+    /// Blend amount [0.0-1.0]; typical: 0.6; higher = stronger enhancement
     float amount = 0.6F;
 };
 
+/// Richardson-Lucy iterative deconvolution options.
+/// Blind deconvolution with Gaussian PSF kernel.
 struct RichardsonLucyOptions {
+    /// Enable/disable this stage in the pipeline
+    bool enabled = true;
+    /// Number of iterations [1, 10]; typical: 2-5; higher = more deconvolution but risk of artifacts
     int iterations = 2;
+    /// PSF Gaussian standard deviation [0.5, 5.0]; typical: 2.5; width of assumed blur
     float psf_sigma = 2.5F;
+    /// PSF kernel half-width in pixels [1, 15]; typical: 7; derived from psf_sigma
     int psf_radius = 7;
+    /// Regularization epsilon [1e-9, 1e-5]; prevents division by zero; typical: 1e-7
     float epsilon = 1.0e-7F;
 };
 

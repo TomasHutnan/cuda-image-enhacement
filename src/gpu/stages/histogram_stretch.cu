@@ -105,7 +105,7 @@ namespace tgpu
             static_cast<int>(std::min(expanded_element_count, static_cast<std::size_t>(std::numeric_limits<int>::max())));
         const int max_bins = std::max(std::min(max_bins_by_shared, max_bins_by_workspace), 1);
 
-        const int bins = std::min(std::max(options.histogram_bins, 64), max_bins);
+        const int bins = std::min(std::max(options.bin_count, 64), max_bins);
 
         auto *device_histogram = reinterpret_cast<unsigned int *>(workspace.auxiliary);
         throw_if_cuda_failed(
