@@ -15,6 +15,7 @@ _KEY_QUIT = (27, ord("q"), ord("Q"))
 _KEY_PREV = (81, 2424832, ord("a"), ord("A"))
 _KEY_NEXT = (83, 2555904, ord("d"), ord("D"))
 _KEY_TOGGLE_DIFF = (ord("m"), ord("M"))
+_DIFF_MODES = ["auto", "percentile", "raw"]
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,10 @@ def _make_diff_display_bgr(first_path: Path, second_path: Path, diff_mode: str) 
         max_diff = float(diff.max())
         if max_diff > 0.0:
             diff = diff / max_diff
+    elif diff_mode == "percentile":
+        p_low, p_high = np.percentile(diff, (2, 98))
+        if p_low != p_high:
+            diff = np.clip((diff - p_low) / (p_high - p_low), 0, 1)
     elif diff_mode != "raw":
         raise ValueError(f"Unsupported diff mode: {diff_mode}")
     return _display_bgr_from_f32(diff)
@@ -206,8 +211,8 @@ def _collect_stage_pairs(first_dir: Path, second_dir: Path, only_stage: str | No
     return pairs
 
 
-def _toggle_diff_mode(diff_mode: str) -> str:
-    return "raw" if diff_mode == "auto" else "auto"
+def _cycle_diff_mode(diff_mode: str) -> str:
+    return _DIFF_MODES[(_DIFF_MODES.index(diff_mode) + 1) % len(_DIFF_MODES)]
 
 
 def _run_pair_loop(window_name: str, pairs: list[StagePair], first_label: str, second_label: str, initial_diff_mode: str) -> None:
@@ -235,7 +240,7 @@ def _run_pair_loop(window_name: str, pairs: list[StagePair], first_label: str, s
         if key in _KEY_NEXT:
             index = (index + 1) % len(pairs)
         if key in _KEY_TOGGLE_DIFF:
-            diff_mode = _toggle_diff_mode(diff_mode)
+            diff_mode = _cycle_diff_mode(diff_mode)
 
 
 def _run_grid_loop(
@@ -259,7 +264,7 @@ def _run_grid_loop(
         if key in _KEY_QUIT:
             break
         if key in _KEY_TOGGLE_DIFF:
-            diff_mode = _toggle_diff_mode(diff_mode)
+            diff_mode = _cycle_diff_mode(diff_mode)
             base_canvas = _make_grid_canvas(pairs, first_label, second_label, diff_mode)
             last_size = (-1, -1)
 
@@ -274,7 +279,7 @@ def show_stage_viewer(
     diff_mode: str = "auto",
     only_stage: str | None = None,
 ) -> None:
-    if diff_mode not in {"auto", "raw"}:
+    if diff_mode not in _DIFF_MODES:
         raise ValueError(f"Unsupported diff mode: {diff_mode}")
 
     pairs = _collect_stage_pairs(first_dir, second_dir, only_stage)
