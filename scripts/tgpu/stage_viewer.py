@@ -14,6 +14,7 @@ _WINDOW_NAME = "tgpu stage viewer"
 _KEY_QUIT = (27, ord("q"), ord("Q"))
 _KEY_PREV = (81, 2424832, ord("a"), ord("A"))
 _KEY_NEXT = (83, 2555904, ord("d"), ord("D"))
+_KEY_TOGGLE_DIFF = (ord("m"), ord("M"))
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ def _load_display_bgr(path: Path) -> np.ndarray:
     return _display_bgr_from_f32(_load_grayscale_f32(path))
 
 
-def _make_diff_display_bgr(first_path: Path, second_path: Path) -> np.ndarray:
+def _make_diff_display_bgr(first_path: Path, second_path: Path, diff_mode: str) -> np.ndarray:
     first = _load_grayscale_f32(first_path)
     second = _load_grayscale_f32(second_path)
 
@@ -57,9 +58,12 @@ def _make_diff_display_bgr(first_path: Path, second_path: Path) -> np.ndarray:
         raise ValueError(f"Mismatched stage image shapes: {first_path} vs {second_path}")
 
     diff = np.abs(first - second)
-    max_diff = float(diff.max())
-    if max_diff > 0.0:
-        diff = diff / max_diff
+    if diff_mode == "auto":
+        max_diff = float(diff.max())
+        if max_diff > 0.0:
+            diff = diff / max_diff
+    elif diff_mode != "raw":
+        raise ValueError(f"Unsupported diff mode: {diff_mode}")
     return _display_bgr_from_f32(diff)
 
 
@@ -103,7 +107,14 @@ def _text(canvas: np.ndarray, text: str, pos: tuple[int, int], scale: float, col
     cv2.putText(canvas, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
-def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index: int, total: int) -> np.ndarray:
+def _make_pair_canvas(
+    pair: StagePair,
+    first_name: str,
+    second_name: str,
+    index: int,
+    total: int,
+    diff_mode: str,
+) -> np.ndarray:
     panel_w = (_DEFAULT_W - 40) // 3
     panel_h = _DEFAULT_H - 84
 
@@ -116,11 +127,11 @@ def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index:
         return panel
 
     def make_diff_panel() -> np.ndarray:
-        img = _fit_inside(_make_diff_display_bgr(pair.first_path, pair.second_path), panel_w, panel_h)
+        img = _fit_inside(_make_diff_display_bgr(pair.first_path, pair.second_path, diff_mode), panel_w, panel_h)
         ih, iw = img.shape[:2]
         panel = np.zeros((panel_h + 44, panel_w, 3), dtype=np.uint8)
         panel[44 + (panel_h - ih) // 2:44 + (panel_h + ih) // 2, (panel_w - iw) // 2:(panel_w + iw) // 2] = img
-        _text(panel, "diff |py-cpp| (auto)", (10, 28), 0.62, (230, 230, 230), 2)
+        _text(panel, f"diff |py-cpp| ({diff_mode})", (10, 28), 0.62, (230, 230, 230), 2)
         return panel
 
     left = make_panel(pair.first_path, first_name)
@@ -129,11 +140,18 @@ def _make_pair_canvas(pair: StagePair, first_name: str, second_name: str, index:
     gap = np.zeros((left.shape[0], 20, 3), dtype=np.uint8)
     canvas = np.concatenate([left, gap, mid, gap, right], axis=1)
     _text(canvas, f"{pair.file_name}  ({index + 1}/{total})", (10, canvas.shape[0] - 28), 0.65, (0, 210, 255), 2)
-    _text(canvas, "Left/Right: prev/next stage  |  Q / Esc: quit", (10, canvas.shape[0] - 8), 0.5, (180, 180, 180))
+    _text(canvas, "Left/Right: prev/next stage  |  M: toggle diff mode  |  Q / Esc: quit", (10, canvas.shape[0] - 8), 0.5, (180, 180, 180))
     return canvas
 
 
-def _make_grid_canvas(pairs: list[StagePair], first_name: str, second_name: str, slot_w: int = 300, slot_h: int = 220) -> np.ndarray:
+def _make_grid_canvas(
+    pairs: list[StagePair],
+    first_name: str,
+    second_name: str,
+    diff_mode: str,
+    slot_w: int = 300,
+    slot_h: int = 220,
+) -> np.ndarray:
     STAGE_H, BAR_H, FOOTER_H, GAP = 20, 32, 28, 10
     n = len(pairs)
     col_h = STAGE_H + (BAR_H + slot_h) * 3
@@ -152,14 +170,14 @@ def _make_grid_canvas(pairs: list[StagePair], first_name: str, second_name: str,
         canvas[r2_img_y:r2_img_y + slot_h, x:x + slot_w] = _fit_to_frame(_load_display_bgr(pair.second_path), slot_w, slot_h)
 
         r3_img_y = r2_img_y + slot_h + BAR_H
-        _text(canvas, "diff |py-cpp| (auto)", (x + 4, r2_img_y + slot_h + BAR_H - 10), 0.42, (220, 220, 220))
+        _text(canvas, f"diff |py-cpp| ({diff_mode})", (x + 4, r2_img_y + slot_h + BAR_H - 10), 0.42, (220, 220, 220))
         canvas[r3_img_y:r3_img_y + slot_h, x:x + slot_w] = _fit_to_frame(
-            _make_diff_display_bgr(pair.first_path, pair.second_path),
+            _make_diff_display_bgr(pair.first_path, pair.second_path, diff_mode),
             slot_w,
             slot_h,
         )
 
-    _text(canvas, "Q or Esc: quit", (4, canvas.shape[0] - 8), 0.45, (180, 180, 180))
+    _text(canvas, "M: toggle diff mode  |  Q or Esc: quit", (4, canvas.shape[0] - 8), 0.45, (180, 180, 180))
     return canvas
 
 
@@ -188,14 +206,21 @@ def _collect_stage_pairs(first_dir: Path, second_dir: Path, only_stage: str | No
     return pairs
 
 
-def _run_pair_loop(window_name: str, pairs: list[StagePair], first_label: str, second_label: str) -> None:
+def _toggle_diff_mode(diff_mode: str) -> str:
+    return "raw" if diff_mode == "auto" else "auto"
+
+
+def _run_pair_loop(window_name: str, pairs: list[StagePair], first_label: str, second_label: str, initial_diff_mode: str) -> None:
     index, last_index, last_size = 0, -1, (-1, -1)
+    diff_mode = initial_diff_mode
+    last_diff_mode = ""
     base_canvas: np.ndarray | None = None
 
     while not _is_closed(window_name):
-        if index != last_index:
-            base_canvas = _make_pair_canvas(pairs[index], first_label, second_label, index, len(pairs))
+        if index != last_index or diff_mode != last_diff_mode:
+            base_canvas = _make_pair_canvas(pairs[index], first_label, second_label, index, len(pairs), diff_mode)
             last_index, last_size = index, (-1, -1)
+            last_diff_mode = diff_mode
 
         size = _window_size(window_name)
         if size != last_size:
@@ -209,10 +234,20 @@ def _run_pair_loop(window_name: str, pairs: list[StagePair], first_label: str, s
             index = (index - 1) % len(pairs)
         if key in _KEY_NEXT:
             index = (index + 1) % len(pairs)
+        if key in _KEY_TOGGLE_DIFF:
+            diff_mode = _toggle_diff_mode(diff_mode)
 
 
-def _run_grid_loop(window_name: str, base_canvas: np.ndarray) -> None:
+def _run_grid_loop(
+    window_name: str,
+    pairs: list[StagePair],
+    first_label: str,
+    second_label: str,
+    initial_diff_mode: str,
+) -> None:
     last_size = (-1, -1)
+    diff_mode = initial_diff_mode
+    base_canvas = _make_grid_canvas(pairs, first_label, second_label, diff_mode)
 
     while not _is_closed(window_name):
         size = _window_size(window_name)
@@ -220,8 +255,13 @@ def _run_grid_loop(window_name: str, base_canvas: np.ndarray) -> None:
             cv2.imshow(window_name, _fit_to_frame(base_canvas, *size))
             last_size = size
 
-        if cv2.waitKeyEx(30) in _KEY_QUIT:
+        key = cv2.waitKeyEx(30)
+        if key in _KEY_QUIT:
             break
+        if key in _KEY_TOGGLE_DIFF:
+            diff_mode = _toggle_diff_mode(diff_mode)
+            base_canvas = _make_grid_canvas(pairs, first_label, second_label, diff_mode)
+            last_size = (-1, -1)
 
 
 def show_stage_viewer(
@@ -231,8 +271,12 @@ def show_stage_viewer(
     first_label: str = "first",
     second_label: str = "second",
     mode: str = "pair",
+    diff_mode: str = "auto",
     only_stage: str | None = None,
 ) -> None:
+    if diff_mode not in {"auto", "raw"}:
+        raise ValueError(f"Unsupported diff mode: {diff_mode}")
+
     pairs = _collect_stage_pairs(first_dir, second_dir, only_stage)
 
     cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
@@ -240,9 +284,9 @@ def show_stage_viewer(
 
     try:
         if mode == "grid":
-            _run_grid_loop(_WINDOW_NAME, _make_grid_canvas(pairs, first_label, second_label))
+            _run_grid_loop(_WINDOW_NAME, pairs, first_label, second_label, diff_mode)
         else:
-            _run_pair_loop(_WINDOW_NAME, pairs, first_label, second_label)
+            _run_pair_loop(_WINDOW_NAME, pairs, first_label, second_label, diff_mode)
     finally:
         if not _is_closed(_WINDOW_NAME):
             cv2.destroyWindow(_WINDOW_NAME)

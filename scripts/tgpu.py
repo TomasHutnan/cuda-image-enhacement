@@ -99,6 +99,12 @@ def add_reference_subcommands(subparsers: argparse._SubParsersAction) -> None:
         help="pair: one stage at a time with arrow keys; grid: all stages in one window",
     )
     view_parser.add_argument(
+        "--diff-mode",
+        choices=("auto", "raw"),
+        default="auto",
+        help="Initial difference-image mode: auto scales diff per stage, raw keeps absolute normalized magnitude",
+    )
+    view_parser.add_argument(
         "--stage",
         choices=STAGE_CHOICES,
         default=None,
@@ -273,6 +279,7 @@ def handle_reference_view_stages(args: argparse.Namespace) -> int:
         first_label=first_label,
         second_label=second_label,
         mode=args.mode,
+        diff_mode=args.diff_mode,
         only_stage=args.stage,
     )
     return 0
