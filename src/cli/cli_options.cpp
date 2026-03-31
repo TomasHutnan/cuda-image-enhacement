@@ -74,14 +74,26 @@ void apply_only_stage_option(tgpu::PipelineRunOptions& options, const std::strin
 }  // namespace
 
 void print_usage(std::ostream& output) {
-    output << "Usage: tgpu_cli <input> <output> [--output-depth u8|u16] [--dump-stages <directory>]"
-              " [--only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch]"
-              " [--unsharp-sigma <value>] [--unsharp-amount <value>]"
-              " [--rl-iterations <int>] [--rl-psf-sigma <value>] [--rl-psf-radius <int>] [--rl-epsilon <value>]"
-              " [--strict-kernel-sync]"
-              " [--benchmark]\n"
-              "\nNote: <input> and <output> can be files or directories. When processing directories,\n"
-              "all supported image files (.png, .jpg, .jpeg, .tif, .tiff, .bmp, .pgm) are processed.\n";
+    output
+        << "Usage: tgpu_cli <input> <output> [OPTIONS]\n"
+        << "\n"
+        << "  <input>              Input file or directory (supported: .png, .jpg, .jpeg, .tif, .tiff, .bmp, .pgm)\n"
+        << "  <output>             Output file or directory (see <input> for supported formats)\n"
+        << "\n"
+        << "Options:\n"
+        << "  --output-depth u8|u16                    Output pixel depth (default: u16)\n"
+        << "  --dump-stages <directory>                Save intermediate stages to directory\n"
+        << "  --only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch\n"
+        << "                                           Process only the specified stage (default: all stages)\n"
+        << "  --unsharp-sigma <value>                  Sigma for unsharp mask (default: 1.6666667)\n"
+        << "  --unsharp-amount <value>                 Amount for unsharp mask (default: 0.6)\n"
+        << "  --rl-iterations <int>                    Number of Richardson-Lucy iterations (default: 2)\n"
+        << "  --rl-psf-sigma <value>                   Sigma of the PSF Gaussian kernel (default: 2.5)\n"
+        << "  --rl-psf-radius <int>                    Radius of the PSF kernel (default: 7)\n"
+        << "  --rl-epsilon <value>                     Convergence threshold for RL (default: 1e-7)\n"
+        << "  --strict-kernel-sync                     Synchronize kernels strictly (default: disabled)\n"
+        << "  --benchmark                              Run in benchmark mode (default: disabled)\n"
+        << "\n";
 }
 
 CliArguments parse_cli_arguments(int argc, char** argv) {

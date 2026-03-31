@@ -9,7 +9,7 @@ namespace tgpu::cli {
 struct CliArguments {
     std::filesystem::path input_path;
     std::filesystem::path output_path;
-    tgpu::BitDepth output_depth = tgpu::BitDepth::u8;
+    tgpu::BitDepth output_depth = tgpu::BitDepth::u16;
     std::filesystem::path stages_output_dir;
     bool dump_stages = false;
     tgpu::PipelineRunOptions pipeline_options;
