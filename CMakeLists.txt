@@ -28,7 +28,7 @@ enable_testing()
 find_package(CUDAToolkit REQUIRED)
 find_package(Catch2 3 REQUIRED CONFIG)
 include(Catch)
-find_package(OpenCV REQUIRED CONFIG COMPONENTS imgcodecs imgproc)
+find_package(OpenCV REQUIRED CONFIG COMPONENTS imgcodecs imgproc highgui)
 
 add_library(tgpu_core
     src/common/image_io.cpp
@@ -65,6 +65,12 @@ add_executable(tgpu_cli
 )
 target_include_directories(tgpu_cli PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(tgpu_cli PRIVATE tgpu_core)
+
+add_executable(tgpu_stream_viewer
+    src/stream_viewer.cpp
+)
+target_include_directories(tgpu_stream_viewer PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(tgpu_stream_viewer PRIVATE tgpu_core opencv_highgui)
 
 add_executable(tgpu_unit_tests
     tests/cpp/core/image_tests.cpp

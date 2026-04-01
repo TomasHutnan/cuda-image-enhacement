@@ -7,7 +7,9 @@
       "name": "opencv4",
       "default-features": false,
       "features": [
-        "png"
+        "png",
+        "highgui",
+        "win32ui"
       ]
     }
   ],

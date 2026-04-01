@@ -20,6 +20,9 @@
         "strategy": "set"
       },
       "binaryDir": "${sourceDir}/build",
+      "environment": {
+        "VCPKG_PLATFORM_TOOLSET": "v143"
+      },
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
