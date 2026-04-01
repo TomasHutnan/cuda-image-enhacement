@@ -7,9 +7,8 @@
   },
   "configurePresets": [
     {
-      "name": "default",
-      "displayName": "Default Configure",
-      "description": "Configure with vcpkg manifest mode using the VCPKG_ROOT environment variable.",
+      "name": "base",
+      "hidden": true,
       "generator": "Visual Studio 17 2022",
       "toolset": {
         "value": "host=x64",
@@ -20,12 +19,16 @@
         "strategy": "set"
       },
       "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "environment": {
         "VCPKG_PLATFORM_TOOLSET": "v143"
-      },
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
+    },
+    {
+      "name": "default",
+      "inherits": "base",
+      "displayName": "Default Configure",
+      "description": "Project default (vcpkg manifest mode via VCPKG_ROOT)."
     }
   ],
   "buildPresets": [
