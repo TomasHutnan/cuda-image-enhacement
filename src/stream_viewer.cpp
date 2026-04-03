@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <iomanip>
@@ -63,6 +64,7 @@ void print_usage(std::ostream& output) {
         << "\n"
         << "Options:\n"
         << "  --fps <value>                            Target stream FPS (default: 10.0)\n"
+        << "  --side-by-side                           Show original and enhanced images side by side\n"
         << "  --only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch\n"
         << "                                           Process only the specified stage (default: all stages)\n"
         << "  --unsharp-sigma <value>                  Sigma for unsharp mask (default: 1.6666667)\n"
@@ -157,6 +159,10 @@ StreamArguments parse_arguments(int argc, char** argv) {
             arguments.fps = parse_double_option(argv[++index], "fps");
             continue;
         }
+        if (argument == "--side-by-side") {
+            arguments.side_by_side = true;
+            continue;
+        }
         if (argument == "--only-stage" && index + 1 < argc) {
             apply_only_stage_option(arguments.pipeline_options, argv[++index]);
             continue;
@@ -219,6 +225,28 @@ cv::Mat image_f32_to_display_mat(const tgpu::ImageF32& image) {
     cv::Mat display_u8;
     f32_mat.convertTo(display_u8, CV_8U, 255.0);
     return display_u8;
+}
+
+cv::Mat imagegray_to_display_mat(const tgpu::ImageGray& image) {
+    cv::Mat mat(image.height, image.width, CV_8U);
+    for (int row = 0; row < image.height; ++row) {
+        const uint8_t* src = image.row_ptr(row);
+        uint8_t* dst = mat.ptr<uint8_t>(row);
+        std::memcpy(dst, src, image.width * sizeof(uint8_t));
+    }
+    return mat;
+}
+
+cv::Mat create_side_by_side_display(const tgpu::ImageGray& original, const tgpu::ImageF32& processed) {
+    cv::Mat original_mat = imagegray_to_display_mat(original);
+    cv::Mat processed_mat = image_f32_to_display_mat(processed);
+
+    // Create composite image with both side by side
+    cv::Mat composite(original_mat.rows, original_mat.cols * 2 + 10, CV_8U, cv::Scalar(0));
+    original_mat.copyTo(composite(cv::Rect(0, 0, original_mat.cols, original_mat.rows)));
+    processed_mat.copyTo(composite(cv::Rect(original_mat.cols + 10, 0, processed_mat.cols, processed_mat.rows)));
+
+    return composite;
 }
 
 void print_status_line(std::ostream& output,
@@ -400,7 +428,7 @@ int run_stream_viewer(int argc, char** argv) {
                                                    .count();
 
                     if (!processed_queue.push_drop_oldest(
-                            ProcessedFrame{loaded.frame_index, std::move(result.output), result.benchmark,
+                            ProcessedFrame{loaded.frame_index, loaded.input, std::move(result.output), result.benchmark,
                                            loaded.load_ms, pipeline_ms})) {
                         break;
                     }
@@ -423,7 +451,14 @@ int run_stream_viewer(int argc, char** argv) {
                 ProcessedFrame processed;
                 while (processed_queue.pop_wait(processed, stop_requested)) {
                     const auto convert_started = std::chrono::steady_clock::now();
-                    cv::Mat display = image_f32_to_display_mat(processed.output);
+
+                    cv::Mat display;
+                    if (arguments.side_by_side) {
+                        display = create_side_by_side_display(processed.original, processed.output);
+                    } else {
+                        display = image_f32_to_display_mat(processed.output);
+                    }
+
                     const auto convert_finished = std::chrono::steady_clock::now();
                     const double convert_ms = std::chrono::duration<double, std::milli>(
                                                   convert_finished - convert_started)

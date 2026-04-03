@@ -34,6 +34,7 @@ struct LoadedFrame {
 
 struct ProcessedFrame {
 	std::size_t frame_index = 0;
+	tgpu::ImageGray original;
 	tgpu::ImageF32 output;
 	tgpu::PipelineBenchmark benchmark;
 	double load_ms = 0.0;
@@ -52,6 +53,7 @@ struct DisplayFrame {
 struct StreamArguments {
 	std::filesystem::path input_directory;
 	double fps = 10.0;
+	bool side_by_side = false;
 	tgpu::PipelineRunOptions pipeline_options;
 };
 
