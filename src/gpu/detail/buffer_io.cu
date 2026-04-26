@@ -219,6 +219,33 @@ namespace tgpu
         return image;
     }
 
+    DeviceImageF32 download_visible_region_to_device(const DevicePipeline &pipeline, const float *source)
+    {
+        DeviceImageF32 image;
+        image.width = pipeline.width;
+        image.height = pipeline.height;
+        image.stride = pipeline.width;
+
+        const std::size_t row_bytes = static_cast<std::size_t>(image.width) * sizeof(float);
+        const std::size_t total_bytes = row_bytes * static_cast<std::size_t>(image.height);
+        throw_if_cuda_failed(cudaMalloc(&image.data, total_bytes), "cudaMalloc visible device image");
+
+        const float *visible_source = source +
+                                      static_cast<std::size_t>(pipeline.border) * static_cast<std::size_t>(pipeline.expanded_width) +
+                                      static_cast<std::size_t>(pipeline.border);
+        throw_if_cuda_failed(
+            cudaMemcpy2D(
+                image.data,
+                row_bytes,
+                visible_source,
+                static_cast<std::size_t>(pipeline.expanded_width) * sizeof(float),
+                row_bytes,
+                static_cast<std::size_t>(image.height),
+                cudaMemcpyDeviceToDevice),
+            "cudaMemcpy2D visible device image copy");
+        return image;
+    }
+
     void capture_stage_if_requested(
         PipelineRunResult &result,
         const PipelineRunOptions &options,

@@ -164,6 +164,87 @@ namespace tgpu
 
             return result;
         }
+
+        PipelineRunDeviceResult finalize_pipeline_device(DevicePipeline &pipeline, const PipelineRunOptions &options)
+        {
+            PipelineRunDeviceResult result;
+            if (options.collect_benchmark)
+            {
+                result.benchmark.collected = true;
+            }
+
+            auto run_non_local_means = [&]() {
+                run_non_local_means_stage(stage_workspace(pipeline), options.non_local_means);
+            };
+            auto run_unsharp_mask = [&]() {
+                run_unsharp_mask_stage(stage_workspace(pipeline), options.unsharp_mask);
+            };
+            auto run_richardson_lucy = [&]() {
+                run_richardson_lucy_stage(stage_workspace(pipeline), options.richardson_lucy);
+            };
+            auto run_histogram_stretch = [&]() {
+                run_histogram_stretch_stage(stage_workspace(pipeline), options.histogram_stretch);
+            };
+
+            if (options.stage_execution.non_local_means)
+            {
+                if (options.collect_benchmark)
+                {
+                    result.benchmark.non_local_means_ms =
+                        timed_stage_ms(run_non_local_means, "benchmark non_local_means synchronize");
+                }
+                else
+                {
+                    run_non_local_means();
+                }
+                commit_stage_output(pipeline);
+            }
+
+            if (options.stage_execution.unsharp_mask)
+            {
+                if (options.collect_benchmark)
+                {
+                    result.benchmark.unsharp_mask_ms =
+                        timed_stage_ms(run_unsharp_mask, "benchmark unsharp_mask synchronize");
+                }
+                else
+                {
+                    run_unsharp_mask();
+                }
+                commit_stage_output(pipeline);
+            }
+
+            if (options.stage_execution.richardson_lucy)
+            {
+                if (options.collect_benchmark)
+                {
+                    result.benchmark.richardson_lucy_ms =
+                        timed_stage_ms(run_richardson_lucy, "benchmark richardson_lucy synchronize");
+                }
+                else
+                {
+                    run_richardson_lucy();
+                }
+                commit_stage_output(pipeline);
+            }
+
+            if (options.stage_execution.histogram_stretch)
+            {
+                if (options.collect_benchmark)
+                {
+                    result.benchmark.histogram_stretch_ms =
+                        timed_stage_ms(run_histogram_stretch, "benchmark histogram_stretch synchronize");
+                }
+                else
+                {
+                    run_histogram_stretch();
+                }
+                commit_stage_output(pipeline);
+            }
+
+            result.output = download_visible_region_to_device(pipeline, pipeline.current);
+            return result;
+        }
     } // namespace
 
     void run_passthrough_stage(const StageWorkspace &workspace, const char *operation)
@@ -267,6 +348,68 @@ namespace tgpu
 
         initialize_pipeline_from_normalized(input, *pipeline);
         return finalize_pipeline(*pipeline, options);
+    }
+
+    PipelineRunDeviceResult run_pipeline_cuda_device(const ImageGray &input, const PipelineRunOptions &options)
+    {
+        if (input.empty())
+        {
+            return {};
+        }
+
+        StrictKernelSyncGuard sync_guard(options.strict_kernel_sync_checks);
+
+        DevicePipeline pipeline = create_pipeline(input.width, input.height);
+        PipelineRunDeviceResult result;
+        if (options.collect_benchmark)
+        {
+            result.benchmark.collected = true;
+            result.benchmark.host_to_device_ms = timed_ms([&]() {
+                initialize_pipeline_from_raw(input, pipeline);
+            });
+        }
+        else
+        {
+            initialize_pipeline_from_raw(input, pipeline);
+        }
+
+        PipelineRunDeviceResult tail = finalize_pipeline_device(pipeline, options);
+        if (options.collect_benchmark)
+        {
+            tail.benchmark.host_to_device_ms = result.benchmark.host_to_device_ms;
+        }
+        return tail;
+    }
+
+    PipelineRunDeviceResult run_pipeline_cuda_device(const ImageF32 &input, const PipelineRunOptions &options)
+    {
+        if (input.empty())
+        {
+            return {};
+        }
+
+        StrictKernelSyncGuard sync_guard(options.strict_kernel_sync_checks);
+
+        DevicePipeline pipeline = create_pipeline(input.width, input.height);
+        PipelineRunDeviceResult result;
+        if (options.collect_benchmark)
+        {
+            result.benchmark.collected = true;
+            result.benchmark.host_to_device_ms = timed_ms([&]() {
+                initialize_pipeline_from_normalized(input, pipeline);
+            });
+        }
+        else
+        {
+            initialize_pipeline_from_normalized(input, pipeline);
+        }
+
+        PipelineRunDeviceResult tail = finalize_pipeline_device(pipeline, options);
+        if (options.collect_benchmark)
+        {
+            tail.benchmark.host_to_device_ms = result.benchmark.host_to_device_ms;
+        }
+        return tail;
     }
 
     void begin_pipeline_batch_cuda(int width, int height)

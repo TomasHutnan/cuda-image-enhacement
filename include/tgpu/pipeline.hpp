@@ -98,8 +98,33 @@ struct PipelineRunResult {
     PipelineBenchmark benchmark{};
 };
 
+struct DeviceImageF32 {
+    float* data = nullptr;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+
+    DeviceImageF32() = default;
+    DeviceImageF32(const DeviceImageF32&) = delete;
+    DeviceImageF32& operator=(const DeviceImageF32&) = delete;
+    DeviceImageF32(DeviceImageF32&& other) noexcept;
+    DeviceImageF32& operator=(DeviceImageF32&& other) noexcept;
+    ~DeviceImageF32();
+
+    [[nodiscard]] bool empty() const noexcept {
+        return data == nullptr || width <= 0 || height <= 0 || stride < width;
+    }
+};
+
+struct PipelineRunDeviceResult {
+    DeviceImageF32 output;
+    PipelineBenchmark benchmark{};
+};
+
 PipelineRunResult run_pipeline(const ImageGray& input, const PipelineRunOptions& options = {});
 PipelineRunResult run_pipeline(const ImageF32& input, const PipelineRunOptions& options = {});
+PipelineRunDeviceResult run_pipeline_device(const ImageGray& input, const PipelineRunOptions& options = {});
+PipelineRunDeviceResult run_pipeline_device(const ImageF32& input, const PipelineRunOptions& options = {});
 
 // Initializes persistent GPU workspace for processing a same-resolution batch.
 void begin_pipeline_batch(int width, int height);
