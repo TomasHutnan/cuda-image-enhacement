@@ -24,8 +24,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride_bytes) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
@@ -50,8 +50,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride_pixels) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
@@ -76,8 +76,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
@@ -216,6 +216,33 @@ namespace tgpu
                 static_cast<std::size_t>(image.height),
                 cudaMemcpyDeviceToHost),
             "cudaMemcpy2D download visible image");
+        return image;
+    }
+
+    DeviceImageF32 download_visible_region_to_device(const DevicePipeline &pipeline, const float *source)
+    {
+        DeviceImageF32 image;
+        image.width = pipeline.width;
+        image.height = pipeline.height;
+        image.stride = pipeline.width;
+
+        const std::size_t row_bytes = static_cast<std::size_t>(image.width) * sizeof(float);
+        const std::size_t total_bytes = row_bytes * static_cast<std::size_t>(image.height);
+        throw_if_cuda_failed(cudaMalloc(&image.data, total_bytes), "cudaMalloc visible device image");
+
+        const float *visible_source = source +
+                                      static_cast<std::size_t>(pipeline.border) * static_cast<std::size_t>(pipeline.expanded_width) +
+                                      static_cast<std::size_t>(pipeline.border);
+        throw_if_cuda_failed(
+            cudaMemcpy2D(
+                image.data,
+                row_bytes,
+                visible_source,
+                static_cast<std::size_t>(pipeline.expanded_width) * sizeof(float),
+                row_bytes,
+                static_cast<std::size_t>(image.height),
+                cudaMemcpyDeviceToDevice),
+            "cudaMemcpy2D visible device image copy");
         return image;
     }
 

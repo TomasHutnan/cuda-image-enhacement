@@ -3,6 +3,8 @@
   "version-string": "0.1.0",
   "dependencies": [
     "catch2",
+    "glad",
+    "glfw3",
     {
       "name": "opencv4",
       "default-features": false,

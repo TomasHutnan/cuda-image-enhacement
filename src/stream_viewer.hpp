@@ -21,6 +21,11 @@
 
 namespace tgpu::stream {
 
+enum class DisplayBackend {
+	opengl,
+	opencv,
+};
+
 struct ScheduledFrame {
 	std::size_t frame_index = 0;
 	std::filesystem::path image_path;
@@ -36,6 +41,8 @@ struct ProcessedFrame {
 	std::size_t frame_index = 0;
 	tgpu::ImageGray original;
 	tgpu::ImageF32 output;
+	tgpu::DeviceImageF32 device_output;
+	bool has_device_output = false;
 	tgpu::PipelineBenchmark benchmark;
 	double load_ms = 0.0;
 	double pipeline_ms = 0.0;
@@ -54,6 +61,7 @@ struct StreamArguments {
 	std::filesystem::path input_directory;
 	double fps = 10.0;
 	bool side_by_side = false;
+	DisplayBackend display_backend = DisplayBackend::opengl;
 	tgpu::PipelineRunOptions pipeline_options;
 };
 

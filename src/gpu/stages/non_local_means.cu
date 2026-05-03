@@ -62,8 +62,8 @@ namespace tgpu
                         continue;
                     }
 
-                    const int neighbor_x = clamp_coordinate(x + offset_x, expanded_width);
-                    const int neighbor_y = clamp_coordinate(y + offset_y, expanded_height);
+                    const int neighbor_x = reflect_coordinate(x + offset_x, expanded_width);
+                    const int neighbor_y = reflect_coordinate(y + offset_y, expanded_height);
                     const std::size_t neighbor_index = expanded_index(neighbor_x, neighbor_y, expanded_width);
                     const float neighbor_value = input[neighbor_index];
 
@@ -81,10 +81,10 @@ namespace tgpu
                     {
                         for (int patch_x = -patch_radius; patch_x <= patch_radius; ++patch_x)
                         {
-                            const int sample_x = clamp_coordinate(x + patch_x, expanded_width);
-                            const int sample_y = clamp_coordinate(y + patch_y, expanded_height);
-                            const int neighbor_sample_x = clamp_coordinate(neighbor_x + patch_x, expanded_width);
-                            const int neighbor_sample_y = clamp_coordinate(neighbor_y + patch_y, expanded_height);
+                            const int sample_x = reflect_coordinate(x + patch_x, expanded_width);
+                            const int sample_y = reflect_coordinate(y + patch_y, expanded_height);
+                            const int neighbor_sample_x = reflect_coordinate(neighbor_x + patch_x, expanded_width);
+                            const int neighbor_sample_y = reflect_coordinate(neighbor_y + patch_y, expanded_height);
 
                             const float difference =
                                 input[expanded_index(sample_x, sample_y, expanded_width)] -

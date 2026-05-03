@@ -1,4 +1,5 @@
 #include "stream_viewer.hpp"
+#include "stream_viewer_gl.hpp"
 
 #include <chrono>
 #include <cctype>
@@ -64,6 +65,7 @@ void print_usage(std::ostream& output) {
         << "\n"
         << "Options:\n"
         << "  --fps <value>                            Target stream FPS (default: 10.0)\n"
+        << "  --display-backend opengl|opencv         Display backend (default: opengl)\n"
         << "  --side-by-side                           Show original and enhanced images side by side\n"
         << "  --only-stage non_local_means|unsharp_mask|richardson_lucy|histogram_stretch\n"
         << "                                           Process only the specified stage (default: all stages)\n"
@@ -145,6 +147,16 @@ void apply_only_stage_option(tgpu::PipelineRunOptions& options, const std::strin
     throw std::runtime_error("Unsupported stage name for --only-stage: " + value);
 }
 
+DisplayBackend parse_display_backend(const std::string& value) {
+    if (value == "opengl") {
+        return DisplayBackend::opengl;
+    }
+    if (value == "opencv") {
+        return DisplayBackend::opencv;
+    }
+    throw std::runtime_error("Unsupported value for --display-backend: " + value);
+}
+
 StreamArguments parse_arguments(int argc, char** argv) {
     if (argc < 2) {
         throw std::invalid_argument("usage");
@@ -157,6 +169,10 @@ StreamArguments parse_arguments(int argc, char** argv) {
         const std::string argument = argv[index];
         if (argument == "--fps" && index + 1 < argc) {
             arguments.fps = parse_double_option(argv[++index], "fps");
+            continue;
+        }
+        if (argument == "--display-backend" && index + 1 < argc) {
+            arguments.display_backend = parse_display_backend(argv[++index]);
             continue;
         }
         if (argument == "--side-by-side") {
@@ -299,6 +315,12 @@ int run_stream_viewer(int argc, char** argv) {
             return 1;
         }
 
+        bool use_opengl_backend = arguments.display_backend == DisplayBackend::opengl;
+        if (use_opengl_backend && arguments.side_by_side) {
+            std::cerr << "--side-by-side currently requires OpenCV display backend; falling back to opencv\n";
+            use_opengl_backend = false;
+        }
+
         const auto frame_period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(1.0 / arguments.fps));
         ImageCache image_cache(kImageCacheCapacity);
@@ -421,15 +443,28 @@ int run_stream_viewer(int argc, char** argv) {
                     }
 
                     const auto pipeline_started = std::chrono::steady_clock::now();
-                    tgpu::PipelineRunResult result = tgpu::run_pipeline(loaded.input, arguments.pipeline_options);
-                    const auto pipeline_finished = std::chrono::steady_clock::now();
-                    const double pipeline_ms = std::chrono::duration<double, std::milli>(
-                                                   pipeline_finished - pipeline_started)
-                                                   .count();
+                    ProcessedFrame processed_frame;
+                    processed_frame.frame_index = loaded.frame_index;
+                    processed_frame.load_ms = loaded.load_ms;
 
-                    if (!processed_queue.push_drop_oldest(
-                            ProcessedFrame{loaded.frame_index, loaded.input, std::move(result.output), result.benchmark,
-                                           loaded.load_ms, pipeline_ms})) {
+                    if (use_opengl_backend) {
+                        tgpu::PipelineRunDeviceResult result = tgpu::run_pipeline_device(loaded.input, arguments.pipeline_options);
+                        processed_frame.device_output = std::move(result.output);
+                        processed_frame.has_device_output = true;
+                        processed_frame.benchmark = result.benchmark;
+                    } else {
+                        processed_frame.original = loaded.input;
+                        tgpu::PipelineRunResult result = tgpu::run_pipeline(loaded.input, arguments.pipeline_options);
+                        processed_frame.output = std::move(result.output);
+                        processed_frame.benchmark = result.benchmark;
+                    }
+
+                    const double pipeline_ms = std::chrono::duration<double, std::milli>(
+                                                   std::chrono::steady_clock::now() - pipeline_started)
+                                                   .count();
+                    processed_frame.pipeline_ms = pipeline_ms;
+
+                    if (!processed_queue.push_drop_oldest(std::move(processed_frame))) {
                         break;
                     }
                 }
@@ -446,41 +481,48 @@ int run_stream_viewer(int argc, char** argv) {
             processed_queue.close();
         });
 
-        std::thread convert_thread([&] {
-            try {
-                ProcessedFrame processed;
-                while (processed_queue.pop_wait(processed, stop_requested)) {
-                    const auto convert_started = std::chrono::steady_clock::now();
+        std::thread convert_thread;
+        if (!use_opengl_backend) {
+            convert_thread = std::thread([&] {
+                try {
+                    ProcessedFrame processed;
+                    while (processed_queue.pop_wait(processed, stop_requested)) {
+                        const auto convert_started = std::chrono::steady_clock::now();
 
-                    cv::Mat display;
-                    if (arguments.side_by_side) {
-                        display = create_side_by_side_display(processed.original, processed.output);
-                    } else {
-                        display = image_f32_to_display_mat(processed.output);
+                        cv::Mat display;
+                        if (arguments.side_by_side) {
+                            display = create_side_by_side_display(processed.original, processed.output);
+                        } else {
+                            display = image_f32_to_display_mat(processed.output);
+                        }
+
+                        const auto convert_finished = std::chrono::steady_clock::now();
+                        const double convert_ms = std::chrono::duration<double, std::milli>(
+                                                      convert_finished - convert_started)
+                                                      .count();
+
+                        if (!display_queue.push_drop_oldest(
+                                DisplayFrame{processed.frame_index, std::move(display), processed.benchmark,
+                                             processed.load_ms, processed.pipeline_ms, convert_ms})) {
+                            break;
+                        }
                     }
-
-                    const auto convert_finished = std::chrono::steady_clock::now();
-                    const double convert_ms = std::chrono::duration<double, std::milli>(
-                                                  convert_finished - convert_started)
-                                                  .count();
-
-                    if (!display_queue.push_drop_oldest(
-                            DisplayFrame{processed.frame_index, std::move(display), processed.benchmark,
-                                         processed.load_ms, processed.pipeline_ms, convert_ms})) {
-                        break;
-                    }
+                } catch (...) {
+                    fail_workers(std::current_exception());
                 }
-            } catch (...) {
-                fail_workers(std::current_exception());
-            }
-            display_queue.close();
-        });
+                display_queue.close();
+            });
+        }
 
         std::cout << "Starting stream from " << arguments.input_directory
                   << " with " << image_files.size() << " image(s) at "
-                  << arguments.fps << " FPS. Press q or Esc to exit.\n";
+                  << arguments.fps << " FPS using "
+                  << (use_opengl_backend ? "opengl" : "opencv")
+                  << " backend. Press q or Esc to exit.\n";
 
-        cv::namedWindow(kWindowTitle, cv::WINDOW_NORMAL);
+        if (!use_opengl_backend) {
+            cv::namedWindow(kWindowTitle, cv::WINDOW_NORMAL);
+        }
 
         auto loop_started = std::chrono::steady_clock::now();
         std::size_t displayed_frames = 0;
@@ -490,42 +532,86 @@ int run_stream_viewer(int argc, char** argv) {
         double last_imshow_ms = 0.0;
         tgpu::PipelineBenchmark last_benchmark{};
 
-        while (!stop_requested.load()) {
-            DisplayFrame frame;
-            if (display_queue.pop_wait_for(frame, kDisplayPollTimeout, stop_requested)) {
-                const auto imshow_started = std::chrono::steady_clock::now();
-                cv::imshow(kWindowTitle, frame.display);
-                const auto imshow_finished = std::chrono::steady_clock::now();
+        if (use_opengl_backend) {
+            GlCudaPresenter presenter(kWindowTitle);
+            while (!stop_requested.load()) {
+                ProcessedFrame frame;
+                if (processed_queue.pop_wait_for(frame, kDisplayPollTimeout, stop_requested)) {
+                    const auto present_started = std::chrono::steady_clock::now();
+                    if (frame.has_device_output) {
+                        presenter.present(frame.device_output);
+                    }
+                    const auto present_finished = std::chrono::steady_clock::now();
 
-                ++displayed_frames;
-                last_load_ms = frame.load_ms;
-                last_pipeline_ms = frame.pipeline_ms;
-                last_convert_ms = frame.convert_ms;
-                last_imshow_ms = std::chrono::duration<double, std::milli>(imshow_finished - imshow_started).count();
-                last_benchmark = frame.benchmark;
+                    ++displayed_frames;
+                    last_load_ms = frame.load_ms;
+                    last_pipeline_ms = frame.pipeline_ms;
+                    last_convert_ms = 0.0;
+                    last_imshow_ms = std::chrono::duration<double, std::milli>(present_finished - present_started).count();
+                    last_benchmark = frame.benchmark;
+                }
+
+                presenter.poll_events();
+                if (presenter.should_close()) {
+                    stop_requested = true;
+                    break;
+                }
+
+                if (displayed_frames > 0 && displayed_frames % kStatusUpdateEveryNFrames == 0) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const double elapsed_s = std::chrono::duration<double>(now - loop_started).count();
+                    const double actual_fps = elapsed_s > 0.0 ? static_cast<double>(displayed_frames) / elapsed_s : 0.0;
+                    print_status_line(std::cout,
+                                      actual_fps,
+                                      last_load_ms,
+                                      last_pipeline_ms,
+                                      last_convert_ms,
+                                      last_imshow_ms,
+                                      schedule_queue.size(),
+                                      loaded_queue.size(),
+                                      processed_queue.size(),
+                                      0,
+                                      last_benchmark);
+                }
             }
+        } else {
+            while (!stop_requested.load()) {
+                DisplayFrame frame;
+                if (display_queue.pop_wait_for(frame, kDisplayPollTimeout, stop_requested)) {
+                    const auto imshow_started = std::chrono::steady_clock::now();
+                    cv::imshow(kWindowTitle, frame.display);
+                    const auto imshow_finished = std::chrono::steady_clock::now();
 
-            const int key = cv::waitKey(static_cast<int>(kUiPollInterval.count()));
-            if (key == 27 || key == 'q' || key == 'Q') {
-                stop_requested = true;
-                break;
-            }
+                    ++displayed_frames;
+                    last_load_ms = frame.load_ms;
+                    last_pipeline_ms = frame.pipeline_ms;
+                    last_convert_ms = frame.convert_ms;
+                    last_imshow_ms = std::chrono::duration<double, std::milli>(imshow_finished - imshow_started).count();
+                    last_benchmark = frame.benchmark;
+                }
 
-            if (displayed_frames > 0 && displayed_frames % kStatusUpdateEveryNFrames == 0) {
-                const auto now = std::chrono::steady_clock::now();
-                const double elapsed_s = std::chrono::duration<double>(now - loop_started).count();
-                const double actual_fps = elapsed_s > 0.0 ? static_cast<double>(displayed_frames) / elapsed_s : 0.0;
-                print_status_line(std::cout,
-                                  actual_fps,
-                                  last_load_ms,
-                                  last_pipeline_ms,
-                                  last_convert_ms,
-                                  last_imshow_ms,
-                                  schedule_queue.size(),
-                                  loaded_queue.size(),
-                                  processed_queue.size(),
-                                  display_queue.size(),
-                                  last_benchmark);
+                const int key = cv::waitKey(static_cast<int>(kUiPollInterval.count()));
+                if (key == 27 || key == 'q' || key == 'Q') {
+                    stop_requested = true;
+                    break;
+                }
+
+                if (displayed_frames > 0 && displayed_frames % kStatusUpdateEveryNFrames == 0) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const double elapsed_s = std::chrono::duration<double>(now - loop_started).count();
+                    const double actual_fps = elapsed_s > 0.0 ? static_cast<double>(displayed_frames) / elapsed_s : 0.0;
+                    print_status_line(std::cout,
+                                      actual_fps,
+                                      last_load_ms,
+                                      last_pipeline_ms,
+                                      last_convert_ms,
+                                      last_imshow_ms,
+                                      schedule_queue.size(),
+                                      loaded_queue.size(),
+                                      processed_queue.size(),
+                                      display_queue.size(),
+                                      last_benchmark);
+                }
             }
         }
 
@@ -539,7 +625,9 @@ int run_stream_viewer(int argc, char** argv) {
         loader_thread.join();
         prefetch_thread.join();
         gpu_thread.join();
-        convert_thread.join();
+        if (convert_thread.joinable()) {
+            convert_thread.join();
+        }
 
         {
             std::lock_guard<std::mutex> lock(worker_error_mutex);
@@ -549,7 +637,9 @@ int run_stream_viewer(int argc, char** argv) {
         }
 
         std::cout << '\n';
-        cv::destroyAllWindows();
+        if (!use_opengl_backend) {
+            cv::destroyAllWindows();
+        }
         return 0;
     } catch (const std::invalid_argument&) {
         print_usage(std::cout);

@@ -22,6 +22,7 @@ namespace tgpu
     void run_histogram_stretch_stage(const StageWorkspace &workspace, const HistogramStretchOptions &options);
 
     ImageF32 download_visible_region(const DevicePipeline &pipeline, const float *source);
+    DeviceImageF32 download_visible_region_to_device(const DevicePipeline &pipeline, const float *source);
     void capture_stage_if_requested(
         PipelineRunResult &result,
         const PipelineRunOptions &options,
@@ -32,6 +33,8 @@ namespace tgpu
 
     PipelineRunResult run_pipeline_cuda(const ImageGray &input, const PipelineRunOptions &options);
     PipelineRunResult run_pipeline_cuda(const ImageF32 &input, const PipelineRunOptions &options);
+    PipelineRunDeviceResult run_pipeline_cuda_device(const ImageGray &input, const PipelineRunOptions &options);
+    PipelineRunDeviceResult run_pipeline_cuda_device(const ImageF32 &input, const PipelineRunOptions &options);
     void begin_pipeline_batch_cuda(int width, int height);
     void end_pipeline_batch_cuda();
 

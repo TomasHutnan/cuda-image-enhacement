@@ -20,6 +20,9 @@ find_package(CUDAToolkit REQUIRED)
 find_package(Catch2 3 REQUIRED CONFIG)
 include(Catch)
 find_package(OpenCV REQUIRED CONFIG COMPONENTS imgcodecs imgproc highgui)
+find_package(OpenGL REQUIRED)
+find_package(glfw3 REQUIRED CONFIG)
+find_package(glad CONFIG REQUIRED)
 
 set(TGPU_PUBLIC_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
 set(TGPU_PRIVATE_GPU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/src/gpu)
@@ -67,8 +70,10 @@ add_tgpu_app(tgpu_cli
 
 add_tgpu_app(tgpu_stream_viewer
     src/stream_viewer.cpp
+    src/stream_viewer_gl.cpp
+    src/stream_viewer_gl_cuda.cu
 )
-target_link_libraries(tgpu_stream_viewer PRIVATE tgpu_core opencv_highgui)
+target_link_libraries(tgpu_stream_viewer PRIVATE tgpu_core opencv_highgui OpenGL::GL glfw glad::glad)
 
 add_executable(tgpu_unit_tests
     tests/cpp/core/image_tests.cpp

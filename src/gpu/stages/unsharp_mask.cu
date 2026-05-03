@@ -73,7 +73,7 @@ namespace tgpu
             float blurred = 0.0F;
             for (int offset_x = -radius; offset_x <= radius; ++offset_x)
             {
-                const int sample_x = clamp_coordinate(x + offset_x, expanded_width);
+                const int sample_x = reflect_coordinate(x + offset_x, expanded_width);
                 const float weight = kGaussianWeights[offset_x + radius];
                 blurred += weight * input[expanded_index(sample_x, y, expanded_width)];
             }
@@ -100,7 +100,7 @@ namespace tgpu
             float blurred = 0.0F;
             for (int offset_y = -radius; offset_y <= radius; ++offset_y)
             {
-                const int sample_y = clamp_coordinate(y + offset_y, expanded_height);
+                const int sample_y = reflect_coordinate(y + offset_y, expanded_height);
                 const float weight = kGaussianWeights[offset_y + radius];
                 blurred += weight * horizontal_blur[expanded_index(x, sample_y, expanded_width)];
             }
