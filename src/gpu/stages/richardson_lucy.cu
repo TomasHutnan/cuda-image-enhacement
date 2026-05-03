@@ -83,7 +83,7 @@ namespace tgpu
             float convolved = 0.0F;
             for (int offset = -radius; offset <= radius; ++offset)
             {
-                const int sample_x = clamp_coordinate(x + offset, expanded_width);
+                const int sample_x = reflect_coordinate(x + offset, expanded_width);
                 const float weight = kPsf[offset + radius];
                 convolved += weight * input[expanded_index(sample_x, y, expanded_width)];
             }
@@ -109,7 +109,7 @@ namespace tgpu
             float convolved = 0.0F;
             for (int offset = -radius; offset <= radius; ++offset)
             {
-                const int sample_y = clamp_coordinate(y + offset, expanded_height);
+                const int sample_y = reflect_coordinate(y + offset, expanded_height);
                 const float weight = kPsf[offset + radius];
                 convolved += weight * input[expanded_index(x, sample_y, expanded_width)];
             }
@@ -153,7 +153,7 @@ namespace tgpu
             float correction = 0.0F;
             for (int offset = -radius; offset <= radius; ++offset)
             {
-                const int sample_y = clamp_coordinate(y + offset, expanded_height);
+                const int sample_y = reflect_coordinate(y + offset, expanded_height);
                 const float weight = kPsf[offset + radius];
                 correction += weight * correction_input[expanded_index(x, sample_y, expanded_width)];
             }

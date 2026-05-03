@@ -34,20 +34,32 @@ with `x` increasing across columns and `y` increasing across rows.
 
 ## How Borders Are Filled
 
-Every expanded output pixel `(x, y)` maps back to a source pixel by clamping:
+Every expanded output pixel `(x, y)` maps back to a source pixel by reflection:
 
 ```text
-src_x = clamp(x - border, 0, width - 1)
-src_y = clamp(y - border, 0, height - 1)
+period = 2 * (width - 1)       // for horizontal
+modulo = abs(x - border) % period
+src_x = modulo < width ? modulo : period - modulo
+
+period = 2 * (height - 1)      // for vertical
+modulo = abs(y - border) % period
+src_y = modulo < height ? modulo : period - modulo
 ```
 
-This creates replicated borders.
+This creates symmetric (mirrored) borders where edge pixels are reflected back into the image domain.
 
-## Why Replication
+Example with `width=4`, `border=2`:
+- Expanded indices: `-2, -1, 0, 1, 2, 3, 4, 5, ...`
+- Maps to source:   `2,  1, 0, 1, 2, 3, 2, 1, ...`
 
-Replication matches the Python reference and is a good fit for the Richardson-Lucy stage.
+## Why Reflection
 
-It avoids the hard dark edge introduced by zero padding, avoids the wraparound artifact implied by periodic repetition, and does not invent mirrored structures outside the image.
+Reflection padding (symmetric mirroring) is chosen over clamping for several reasons:
+
+1. **Algorithm Compatibility**: Works well with Richardson-Lucy deconvolution and edge-sensitive algorithms
+2. **Artifact Reduction**: Avoids sharp discontinuities at boundaries that clamping introduces
+3. **Perceptual Quality**: Produces smoother transitions at image edges during processing
+4. **Mathematical Properties**: Maintains important symmetries needed for iterative algorithms like Richardson-Lucy
 
 ## Access Rules In Kernels
 

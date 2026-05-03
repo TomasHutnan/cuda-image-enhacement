@@ -22,6 +22,23 @@ namespace tgpu
         return value;
     }
 
+    __host__ __device__ __forceinline__ int reflect_coordinate(int value, int limit)
+    {
+        // Symmetric reflection (reflects around boundaries at 0 and limit-1)
+        // Maps: ..., -2→2, -1→1, 0→0, 1→1, 2→2, 3→2, 4→1, 5→0, ...
+        if (limit <= 0)
+        {
+            return 0;
+        }
+        if (limit == 1)
+        {
+            return 0;
+        }
+        const int period = 2 * (limit - 1);
+        const int modulo = abs(value) % period;
+        return modulo < limit ? modulo : period - modulo;
+    }
+
     __host__ __device__ __forceinline__ std::size_t expanded_index(int x, int y, int expanded_width)
     {
         return static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) + static_cast<std::size_t>(x);

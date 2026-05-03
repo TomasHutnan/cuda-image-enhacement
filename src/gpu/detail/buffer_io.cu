@@ -24,8 +24,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride_bytes) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
@@ -50,8 +50,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride_pixels) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
@@ -76,8 +76,8 @@ namespace tgpu
                 return;
             }
 
-            const int src_x = min(max(x - border, 0), width - 1);
-            const int src_y = min(max(y - border, 0), height - 1);
+            const int src_x = reflect_coordinate(x - border, width);
+            const int src_y = reflect_coordinate(y - border, height);
             const std::size_t src_index = static_cast<std::size_t>(src_y) * static_cast<std::size_t>(stride) +
                                           static_cast<std::size_t>(src_x);
             const std::size_t dst_index = static_cast<std::size_t>(y) * static_cast<std::size_t>(expanded_width) +
