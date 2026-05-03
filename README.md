@@ -49,19 +49,30 @@ cmake --preset local
 cmake --build --preset local
 ```
 
-4. Run the C++ executable:
-
-```bash
-build\Debug\tgpu_cli.exe <input> <output> --dump-stages <directory>
-```
-
-5. Run the C++ unit tests:
-
-```bash
-ctest --preset local
-```
-
 ## Run
+
+This project exposes 3 CLIs, all have a detailed help (-h) option.
+
+The basic usecases for each CLI:
+
+1. The main implementation
+
+```bash
+build\Debug\tgpu_cli.exe <input> <output>
+```
+
+2. The stream viewer
+
+```bash
+build\debug\tgpu_stream_viewer.exe <input-directory>
+```
+
+3. The helpers (first setup a virtual python environment)
+
+```bash
+python .\scripts\tgpu.py reference -h
+```
+
 
 Set up the Python environment and use the project CLI:
 

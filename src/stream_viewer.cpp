@@ -161,6 +161,10 @@ StreamArguments parse_arguments(int argc, char** argv) {
     if (argc < 2) {
         throw std::invalid_argument("usage");
     }
+    if (argv[1][0] == '-')
+    {
+        throw std::invalid_argument("usage");
+    }
 
     StreamArguments arguments;
     arguments.input_directory = argv[1];
