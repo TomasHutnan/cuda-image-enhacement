@@ -1,4 +1,4 @@
-# pv162-tescan-gpu
+# Cuda Image Enhancement
 
 CUDA-focused image processing project for the PV162 TESCAN collaboration.
 
